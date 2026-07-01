@@ -3,11 +3,11 @@ using UnityEngine;
 namespace Delphi
 {
     /// <summary>
-    /// Dead-simple mock sensor: one sine wave + noise. Drop it on a GameObject,
-    /// set the numbers, then drag it into a slot on the DelphiManager.
-    /// The manager calls ReadValue() once per frame to sample it.
+    /// Dead-simple mock scalar sensor: one sine wave + noise. Drop it on a
+    /// GameObject, set the numbers, then drag it into any ScalarSensor slot
+    /// on DelphiManager to test that slot's pipeline end-to-end.
     /// </summary>
-    public class MockSensor : ScalarSensor
+    public class MockSensor_Scalar : ScalarSensor
     {
         [Header("Signal")]
         public float frequency = 0.2f;   // cycles per second (Hz)

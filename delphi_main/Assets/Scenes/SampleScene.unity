@@ -119,7 +119,7 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!1 &81803431
+--- !u!1 &372333635
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -127,89 +127,44 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 81803434}
-  - component: {fileID: 81803433}
-  - component: {fileID: 81803432}
+  - component: {fileID: 372333637}
+  - component: {fileID: 372333636}
   m_Layer: 0
-  m_Name: Camera
+  m_Name: MockSensor_Frame
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!81 &81803432
-AudioListener:
+--- !u!114 &372333636
+MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 81803431}
+  m_GameObject: {fileID: 372333635}
   m_Enabled: 1
---- !u!20 &81803433
-Camera:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 81803431}
-  m_Enabled: 1
-  serializedVersion: 2
-  m_ClearFlags: 1
-  m_BackGroundColor: {r: 0.19215687, g: 0.3019608, b: 0.4745098, a: 0}
-  m_projectionMatrixMode: 1
-  m_GateFitMode: 2
-  m_FOVAxisMode: 0
-  m_Iso: 200
-  m_ShutterSpeed: 0.005
-  m_Aperture: 16
-  m_FocusDistance: 10
-  m_FocalLength: 50
-  m_BladeCount: 5
-  m_Curvature: {x: 2, y: 11}
-  m_BarrelClipping: 0.25
-  m_Anamorphism: 0
-  m_SensorSize: {x: 36, y: 24}
-  m_LensShift: {x: 0, y: 0}
-  m_NormalizedViewPortRect:
-    serializedVersion: 2
-    x: 0
-    y: 0
-    width: 1
-    height: 1
-  near clip plane: 0.3
-  far clip plane: 1000
-  field of view: 60
-  orthographic: 0
-  orthographic size: 5
-  m_Depth: 0
-  m_CullingMask:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_RenderingPath: -1
-  m_TargetTexture: {fileID: 0}
-  m_TargetDisplay: 0
-  m_TargetEye: 3
-  m_HDR: 1
-  m_AllowMSAA: 1
-  m_AllowDynamicResolution: 0
-  m_ForceIntoRT: 0
-  m_OcclusionCulling: 1
-  m_StereoConvergence: 10
-  m_StereoSeparation: 0.022
---- !u!4 &81803434
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d28da4072e314416e923f71a1b85c103, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.MockSensor_Frame
+  clip: {fileID: 32900000, guid: b93ff057d7fd84a02ae9f01402a48d06, type: 3}
+  fallbackWidth: 640
+  fallbackHeight: 360
+--- !u!4 &372333637
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 81803431}
+  m_GameObject: {fileID: 372333635}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.08717229, y: 0.89959055, z: -0.21045254, w: -0.3726226}
-  m_LocalPosition: {x: 13.178247, y: 9.224772, z: 13.178248}
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 989.62524, y: 0.00003, z: 101.95235}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 0}
+  m_Father: {fileID: 1037761337}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &824068706
 GameObject:
@@ -222,7 +177,7 @@ GameObject:
   - component: {fileID: 824068708}
   - component: {fileID: 824068707}
   m_Layer: 0
-  m_Name: MockSensor
+  m_Name: MockSensor_Scalar
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -289,6 +244,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 824068708}
+  - {fileID: 372333637}
   - {fileID: 1647533178}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -326,10 +282,10 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Delphi.DashboardUI
   manager: {fileID: 1745511443}
   dashboardDisplay: 1
-  editorPreviewOffset: {x: -350, y: 200}
+  editorPreviewOffset: {x: -350, y: 230}
   updateInterval: 0.1
-  graphWidth: 240
-  graphHeight: 60
+  cellWidth: 240
+  cellHeight: 60
   columns: 3
   colSpacing: 30
   rowSpacing: 14
@@ -579,6 +535,7 @@ MonoBehaviour:
   pupilDiameter: {fileID: 0}
   eeg: {fileID: 0}
   facial: {fileID: 0}
+  camera: {fileID: 372333636}
 --- !u!4 &1745511444
 Transform:
   m_ObjectHideFlags: 0
@@ -602,4 +559,3 @@ SceneRoots:
   - {fileID: 1219209570}
   - {fileID: 1457698226}
   - {fileID: 1745511444}
-  - {fileID: 81803434}

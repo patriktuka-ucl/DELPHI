@@ -5,22 +5,18 @@ using UnityEngine.UI;
 namespace Delphi
 {
     /// <summary>
-    /// The researcher dashboard. Lists every channel DelphiManager knows about
-    /// (DelphiManager.AllChannels) and, for each one, shows either:
-    ///   - a live scrolling waveform, if that channel currently has data, or
-    ///   - "No signal", if the slot is empty / disconnected.
+    /// The researcher dashboard. Lists every channel DelphiManager knows
+    /// about — both scalar (DelphiManager.AllChannels) and frame/video
+    /// (DelphiManager.AllFrameChannels) — laid out in a top-left grid.
     ///
-    /// Everything is driven through the manager's public API (HasData /
-    /// GetValue / Meta) rather than holding direct sensor references — the
-    /// dashboard doesn't need to know what's plugged in, only what the
-    /// manager is reporting.
+    /// Each cell shows either:
+    ///   - a live scrolling waveform (scalar channels with data), or
+    ///   - a live video preview (frame channels with data), or
+    ///   - "No signal", if that slot is empty / disconnected.
     ///
-    /// NOTE ON VIDEO FEEDS: right now every channel is a ScalarSensor, so
-    /// everything renders as a waveform-or-no-signal row. When a camera /
-    /// FrameSensor channel is added to DelphiManager later, its row would
-    /// show a RawImage of the latest frame instead of a waveform — the
-    /// per-channel Panel below already has room for that branch, it's just
-    /// not wired up until there's an actual frame source to show.
+    /// Driven entirely through the manager's public API (HasData / GetValue /
+    /// Meta for scalars, HasFrame / GetFrame / FrameMeta for video) — the
+    /// dashboard never holds a direct sensor reference.
     ///
     /// Renders on its own display with its own clearing camera, so it never
     /// overlays the simulator/participant view.
@@ -42,8 +38,7 @@ namespace Delphi
             "correct. If that happens, nudge this until it lines up in the top " +
             "-left — e.g. (-350, 200) — and it'll be applied automatically every " +
             "time you press Play. Set back to (0,0) once you're running an " +
-            "actual build with a real second monitor, since Display 2 will then " +
-            "report its true resolution and no offset should be needed.")]
+            "actual build with a real second monitor.")]
         public Vector2 editorPreviewOffset = Vector2.zero;
 
         [Header("Update")]
@@ -51,10 +46,10 @@ namespace Delphi
                  "participant experience, so it doesn't need to be every frame.")]
         public float updateInterval = 0.1f;
 
-        [Header("Graph layout")]
-        [Tooltip("Also doubles as the number of samples kept per channel.")]
-        public int graphWidth  = 240;
-        public int graphHeight = 60;
+        [Header("Grid layout")]
+        [Tooltip("Also doubles as the number of waveform samples kept per channel.")]
+        public int cellWidth   = 240;
+        public int cellHeight  = 60;
         public int columns     = 3;
         public int colSpacing  = 30;
         public int rowSpacing  = 20;
@@ -65,16 +60,22 @@ namespace Delphi
         private readonly Color32 _line   = new Color32(70, 220, 160, 255);
         private readonly Color   _noSig  = new Color(0.45f, 0.45f, 0.45f);
 
-        // Everything the dashboard needs to keep per channel row.
+        // One of these per cell — scalar cells use tex/buffer/history for a
+        // waveform; frame cells just point the RawImage at the sensor's
+        // live texture directly.
         private class Panel
         {
-            public Channel    channel;
+            public bool       isFrame;
+            public Channel    channel;       // valid when !isFrame
+            public FrameChannel frameChannel; // valid when isFrame
             public Text       titleText;
             public Text       valueText;
+            public RawImage   image;
+
+            // Scalar-only:
             public Texture2D  tex;
             public Color32[]  buffer;
-            public float[]    history; // NaN = no sample yet at that slot
-            public RawImage   waveformImage;
+            public float[]    history;
         }
 
         private readonly List<Panel> _panels = new();
@@ -103,8 +104,7 @@ namespace Delphi
         }
 
         // A dedicated camera whose only job is to clear the display every
-        // frame — stops the old smearing issue and keeps this off the
-        // simulator's camera view.
+        // frame — stops smearing, keeps this off the simulator's view.
         private void BuildDashboardCamera()
         {
             var camGO = new GameObject("Dashboard Camera", typeof(Camera));
@@ -130,8 +130,8 @@ namespace Delphi
             scaler.referenceResolution = new Vector2(1920, 1080);
             scaler.matchWidthOrHeight = 0.5f;
 
-            // Editor-only compensation for the Game view's letterboxed preview
-            // of a non-primary display — see the tooltip on editorPreviewOffset.
+            // Editor-only compensation for the Game view's letterboxed
+            // preview of a non-primary display.
             var canvasRT = canvasGO.GetComponent<RectTransform>();
             canvasRT.anchoredPosition = editorPreviewOffset;
 
@@ -147,71 +147,94 @@ namespace Delphi
                 26, TextAnchor.UpperLeft, new Color(0.85f, 0.9f, 1f),
                 new Vector2(30, -20), new Vector2(800, 34));
 
-            int rowHeight = graphHeight + 34; // header row + waveform
-            var channels = DelphiManager.AllChannels;
-
+            int rowHeight = cellHeight + 34; // header row + content
             int cols = Mathf.Max(1, columns);
             const float leftMargin = 30f;
-            const float topMargin  = 66f; // gap below the title
+            const float topMargin  = 66f;
 
-            for (int i = 0; i < channels.Length; i++)
+            var scalarChannels = DelphiManager.AllChannels;
+            var frameChannels  = DelphiManager.AllFrameChannels;
+            int totalCells = scalarChannels.Length + frameChannels.Length;
+
+            for (int i = 0; i < totalCells; i++)
             {
-                var ch = channels[i];
-                var (label, unit) = DelphiManager.Meta(ch);
-
                 int col = i % cols;
                 int row = i / cols;
-                float posX = leftMargin + col * (graphWidth + colSpacing);
-                float posY = -topMargin  - row * (rowHeight  + rowSpacing);
+                float posX = leftMargin + col * (cellWidth  + colSpacing);
+                float posY = -topMargin  - row * (rowHeight + rowSpacing);
 
-                var container = new GameObject($"Panel_{ch}", typeof(RectTransform));
+                bool isFrame = i >= scalarChannels.Length;
+                string label, unit, cellName;
+
+                if (isFrame)
+                {
+                    var fc = frameChannels[i - scalarChannels.Length];
+                    (label, unit) = DelphiManager.FrameMeta(fc);
+                    cellName = $"Panel_{fc}";
+                }
+                else
+                {
+                    var ch = scalarChannels[i];
+                    (label, unit) = DelphiManager.Meta(ch);
+                    cellName = $"Panel_{ch}";
+                }
+
+                var container = new GameObject(cellName, typeof(RectTransform));
                 container.transform.SetParent(canvasGO.transform, false);
                 var crt = container.GetComponent<RectTransform>();
                 crt.anchorMin = crt.anchorMax = new Vector2(0, 1);
                 crt.pivot = new Vector2(0, 1);
                 crt.anchoredPosition = new Vector2(posX, posY);
-                crt.sizeDelta = new Vector2(graphWidth, rowHeight);
+                crt.sizeDelta = new Vector2(cellWidth, rowHeight);
 
-                var titleText = CreateText(container.transform, $"{label} ({unit})".TrimEnd(' ', '(', ')'),
+                var titleText = CreateText(container.transform, $"{label}".TrimEnd(' ', '(', ')'),
                     17, TextAnchor.UpperLeft, new Color(0.8f, 0.85f, 0.95f),
-                    new Vector2(0, 0), new Vector2(graphWidth * 0.6f, 24));
+                    new Vector2(0, 0), new Vector2(cellWidth * 0.6f, 24));
 
                 var valueText = CreateText(container.transform, "No signal",
                     17, TextAnchor.UpperRight, _noSig,
-                    new Vector2(graphWidth * 0.4f, 0), new Vector2(graphWidth * 0.6f, 24));
+                    new Vector2(cellWidth * 0.4f, 0), new Vector2(cellWidth * 0.6f, 24));
 
-                var tex = new Texture2D(graphWidth, graphHeight, TextureFormat.RGBA32, false)
-                    { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
-
-                var imgGO = new GameObject("Waveform", typeof(RawImage));
+                var imgGO = new GameObject("Content", typeof(RawImage));
                 imgGO.transform.SetParent(container.transform, false);
                 var rawImage = imgGO.GetComponent<RawImage>();
-                rawImage.texture = tex;
+                rawImage.color = Color.white; // texture supplies the actual colour
                 var irt = imgGO.GetComponent<RectTransform>();
                 irt.anchorMin = irt.anchorMax = new Vector2(0, 1);
                 irt.pivot = new Vector2(0, 1);
                 irt.anchoredPosition = new Vector2(0, -28);
-                irt.sizeDelta = new Vector2(graphWidth, graphHeight);
+                irt.sizeDelta = new Vector2(cellWidth, cellHeight);
 
-                var history = new float[graphWidth];
-                for (int x = 0; x < graphWidth; x++) history[x] = float.NaN;
-
-                var buffer = new Color32[graphWidth * graphHeight];
-
-                _panels.Add(new Panel
+                var panel = new Panel
                 {
-                    channel       = ch,
-                    titleText     = titleText,
-                    valueText     = valueText,
-                    tex           = tex,
-                    buffer        = buffer,
-                    history       = history,
-                    waveformImage = rawImage
-                });
+                    isFrame      = isFrame,
+                    titleText    = titleText,
+                    valueText    = valueText,
+                    image        = rawImage
+                };
 
-                // Start each texture cleared so empty channels look intentional,
-                // not just uninitialised, before the first refresh runs.
-                ClearTexture(tex, buffer);
+                if (isFrame)
+                {
+                    panel.frameChannel = frameChannels[i - scalarChannels.Length];
+                    // Blank placeholder texture until a real frame arrives.
+                    var placeholder = new Texture2D(2, 2);
+                    placeholder.SetPixels(new[] { (Color)_bg, (Color)_bg, (Color)_bg, (Color)_bg });
+                    placeholder.Apply();
+                    rawImage.texture = placeholder;
+                }
+                else
+                {
+                    panel.channel = scalarChannels[i];
+                    panel.tex     = new Texture2D(cellWidth, cellHeight, TextureFormat.RGBA32, false)
+                        { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+                    panel.buffer  = new Color32[cellWidth * cellHeight];
+                    panel.history = new float[cellWidth];
+                    for (int x = 0; x < cellWidth; x++) panel.history[x] = float.NaN;
+                    rawImage.texture = panel.tex;
+                    ClearTexture(panel.tex, panel.buffer);
+                }
+
+                _panels.Add(panel);
             }
         }
 
@@ -227,34 +250,63 @@ namespace Delphi
         {
             foreach (var p in _panels)
             {
-                bool hasData = manager.HasData(p.channel);
-                float value  = manager.GetValue(p.channel);
-
-                // Shift history left, append newest sample (NaN if no data —
-                // the redraw skips NaN entries, so "no signal" just shows an
-                // empty grid instead of a fake flat line).
-                System.Array.Copy(p.history, 1, p.history, 0, graphWidth - 1);
-                p.history[graphWidth - 1] = hasData ? value : float.NaN;
-
-                Redraw(p);
-
-                var (_, unit) = DelphiManager.Meta(p.channel);
-                if (hasData)
-                {
-                    p.valueText.text  = $"{value:F1} {unit}".TrimEnd();
-                    p.valueText.color = (Color)_line;
-                }
-                else
-                {
-                    p.valueText.text  = "No signal";
-                    p.valueText.color = _noSig;
-                }
+                if (p.isFrame) RefreshFramePanel(p);
+                else            RefreshScalarPanel(p);
             }
         }
 
-        private void Redraw(Panel p)
+        private void RefreshScalarPanel(Panel p)
         {
-            int w = graphWidth, h = graphHeight;
+            bool hasData = manager.HasData(p.channel);
+            float value  = manager.GetValue(p.channel);
+
+            System.Array.Copy(p.history, 1, p.history, 0, cellWidth - 1);
+            p.history[cellWidth - 1] = hasData ? value : float.NaN;
+
+            RedrawWaveform(p);
+
+            var (_, unit) = DelphiManager.Meta(p.channel);
+            if (hasData)
+            {
+                p.valueText.text  = $"{value:F1} {unit}".TrimEnd();
+                p.valueText.color = (Color)_line;
+            }
+            else
+            {
+                p.valueText.text  = "No signal";
+                p.valueText.color = _noSig;
+            }
+        }
+
+        private void RefreshFramePanel(Panel p)
+        {
+            bool hasFrame = manager.HasFrame(p.frameChannel);
+
+            if (hasFrame)
+            {
+                var tex = manager.GetFrame(p.frameChannel);
+                if (tex != null && tex.width > 0)
+                {
+                    p.image.texture = tex;
+
+                    // Keep width fixed at cellWidth; derive height from the
+                    // texture's own aspect ratio so the video isn't stretched.
+                    float aspect = (float)tex.height / tex.width;
+                    p.image.rectTransform.sizeDelta = new Vector2(cellWidth, cellWidth * aspect);
+                }
+                p.valueText.text  = "Live";
+                p.valueText.color = (Color)_line;
+            }
+            else
+            {
+                p.valueText.text  = "No signal";
+                p.valueText.color = _noSig;
+            }
+        }
+
+        private void RedrawWaveform(Panel p)
+        {
+            int w = cellWidth, h = cellHeight;
 
             for (int i = 0; i < p.buffer.Length; i++) p.buffer[i] = _bg;
             int midY = h / 2;
@@ -290,8 +342,6 @@ namespace Delphi
                     prevY = yy;
                 }
             }
-            // If nothing valid this whole window, we just leave the
-            // background + gridline drawn above — a quiet "no signal" look.
 
             p.tex.SetPixels32(p.buffer);
             p.tex.Apply(false);
