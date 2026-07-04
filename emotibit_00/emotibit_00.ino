@@ -7,7 +7,7 @@ float ppgBuffer[MAX_SAMPLES];
 float edaBuffer[MAX_SAMPLES];
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(2000000);
   while (!Serial) { delay(10); }
 
   uint8_t status = emotibit.setup("plotter_test");
