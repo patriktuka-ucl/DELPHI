@@ -132,7 +132,7 @@ MonoBehaviour:
   splineContainer: {fileID: 6775763167198597153}
   showDebugMarkersAtRuntime: 1
   basePlaneRenderer: {fileID: 3782236292143801678}
-  debugColor: {r: 0.34063596, g: 0.5943396, b: 0.08130119, a: 1}
+  debugColor: {r: 0.8018868, g: 0.2004717, b: 0.20718724, a: 1}
   stopPointT: 0.5
   waitDuration: 2
   cornerStartT: 0.3

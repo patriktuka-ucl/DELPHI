@@ -1,0 +1,150 @@
+[2026-07-04 16:59:48.757] [board_logger] [info] incoming json: {"file":"","file_anc":"","file_aux":"","ip_address":"","ip_address_anc":"","ip_address_aux":"","ip_port":0,"ip_port_anc":0,"ip_port_aux":0,"ip_protocol":0,"mac_address":"","master_board":-100,"other_info":"","serial_number":"","serial_port":"","timeout":0}
+[2026-07-04 16:59:48.757] [board_logger] [trace] Board object created 47
+[2026-07-04 16:59:48.757] [board_logger] [warning] no ip_address provided, trying to discover network, it may take longer
+[2026-07-04 16:59:48.757] [board_logger] [info] trying broadcast address: 127.255.255.255
+[2026-07-04 16:59:48.757] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 16:59:53.759] [board_logger] [error] no emotibit found
+[2026-07-04 16:59:53.759] [board_logger] [info] trying broadcast address: 10.23.127.255
+[2026-07-04 16:59:53.759] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 16:59:58.760] [board_logger] [error] no emotibit found
+[2026-07-04 16:59:58.761] [board_logger] [info] trying broadcast address: 169.254.255.255
+[2026-07-04 16:59:58.761] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:00:03.762] [board_logger] [error] no emotibit found
+[2026-07-04 17:00:05.373] [board_logger] [info] incoming json: {"file":"","file_anc":"","file_aux":"","ip_address":"","ip_address_anc":"","ip_address_aux":"","ip_port":0,"ip_port_anc":0,"ip_port_aux":0,"ip_protocol":0,"mac_address":"","master_board":-100,"other_info":"","serial_number":"","serial_port":"","timeout":0}
+[2026-07-04 17:00:05.373] [board_logger] [trace] Board object created 47
+[2026-07-04 17:00:05.373] [board_logger] [warning] no ip_address provided, trying to discover network, it may take longer
+[2026-07-04 17:00:05.373] [board_logger] [info] trying broadcast address: 127.255.255.255
+[2026-07-04 17:00:05.373] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:00:10.374] [board_logger] [error] no emotibit found
+[2026-07-04 17:00:10.375] [board_logger] [info] trying broadcast address: 10.23.127.255
+[2026-07-04 17:00:10.375] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:00:15.376] [board_logger] [error] no emotibit found
+[2026-07-04 17:00:15.376] [board_logger] [info] trying broadcast address: 169.254.255.255
+[2026-07-04 17:00:15.377] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:00:20.377] [board_logger] [error] no emotibit found
+[2026-07-04 17:00:20.527] [board_logger] [info] incoming json: {"file":"","file_anc":"","file_aux":"","ip_address":"","ip_address_anc":"","ip_address_aux":"","ip_port":0,"ip_port_anc":0,"ip_port_aux":0,"ip_protocol":0,"mac_address":"","master_board":-100,"other_info":"","serial_number":"","serial_port":"","timeout":0}
+[2026-07-04 17:00:20.527] [board_logger] [trace] Board object created 47
+[2026-07-04 17:00:20.527] [board_logger] [warning] no ip_address provided, trying to discover network, it may take longer
+[2026-07-04 17:00:20.527] [board_logger] [info] trying broadcast address: 127.255.255.255
+[2026-07-04 17:00:20.527] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:00:25.528] [board_logger] [error] no emotibit found
+[2026-07-04 17:00:25.528] [board_logger] [info] trying broadcast address: 10.23.127.255
+[2026-07-04 17:00:25.528] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:00:30.529] [board_logger] [error] no emotibit found
+[2026-07-04 17:00:30.529] [board_logger] [info] trying broadcast address: 169.254.255.255
+[2026-07-04 17:00:30.530] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:00:35.531] [board_logger] [error] no emotibit found
+[2026-07-04 17:01:02.486] [board_logger] [info] incoming json: {"file":"","file_anc":"","file_aux":"","ip_address":"","ip_address_anc":"","ip_address_aux":"","ip_port":0,"ip_port_anc":0,"ip_port_aux":0,"ip_protocol":0,"mac_address":"","master_board":-100,"other_info":"","serial_number":"","serial_port":"","timeout":0}
+[2026-07-04 17:01:02.486] [board_logger] [trace] Board object created 47
+[2026-07-04 17:01:02.486] [board_logger] [warning] no ip_address provided, trying to discover network, it may take longer
+[2026-07-04 17:01:02.486] [board_logger] [info] trying broadcast address: 127.255.255.255
+[2026-07-04 17:01:02.486] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:01:07.487] [board_logger] [error] no emotibit found
+[2026-07-04 17:01:07.487] [board_logger] [info] trying broadcast address: 10.23.127.255
+[2026-07-04 17:01:07.487] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:01:12.488] [board_logger] [error] no emotibit found
+[2026-07-04 17:01:12.489] [board_logger] [info] trying broadcast address: 169.254.255.255
+[2026-07-04 17:01:12.489] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:01:17.490] [board_logger] [error] no emotibit found
+[2026-07-04 17:01:17.892] [board_logger] [info] incoming json: {"file":"","file_anc":"","file_aux":"","ip_address":"","ip_address_anc":"","ip_address_aux":"","ip_port":0,"ip_port_anc":0,"ip_port_aux":0,"ip_protocol":0,"mac_address":"","master_board":-100,"other_info":"","serial_number":"","serial_port":"","timeout":0}
+[2026-07-04 17:01:17.892] [board_logger] [trace] Board object created 47
+[2026-07-04 17:01:17.892] [board_logger] [warning] no ip_address provided, trying to discover network, it may take longer
+[2026-07-04 17:01:17.893] [board_logger] [info] trying broadcast address: 127.255.255.255
+[2026-07-04 17:01:17.894] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:01:22.895] [board_logger] [error] no emotibit found
+[2026-07-04 17:01:22.895] [board_logger] [info] trying broadcast address: 10.23.127.255
+[2026-07-04 17:01:22.895] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:01:27.896] [board_logger] [error] no emotibit found
+[2026-07-04 17:01:27.897] [board_logger] [info] trying broadcast address: 169.254.255.255
+[2026-07-04 17:01:27.897] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:01:32.899] [board_logger] [error] no emotibit found
+[2026-07-04 17:01:32.989] [board_logger] [info] incoming json: {"file":"","file_anc":"","file_aux":"","ip_address":"","ip_address_anc":"","ip_address_aux":"","ip_port":0,"ip_port_anc":0,"ip_port_aux":0,"ip_protocol":0,"mac_address":"","master_board":-100,"other_info":"","serial_number":"","serial_port":"","timeout":0}
+[2026-07-04 17:01:32.989] [board_logger] [trace] Board object created 47
+[2026-07-04 17:01:32.989] [board_logger] [warning] no ip_address provided, trying to discover network, it may take longer
+[2026-07-04 17:01:32.989] [board_logger] [info] trying broadcast address: 127.255.255.255
+[2026-07-04 17:01:32.989] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:01:37.990] [board_logger] [error] no emotibit found
+[2026-07-04 17:01:37.990] [board_logger] [info] trying broadcast address: 10.23.127.255
+[2026-07-04 17:01:37.990] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:01:42.992] [board_logger] [error] no emotibit found
+[2026-07-04 17:01:42.992] [board_logger] [info] trying broadcast address: 169.254.255.255
+[2026-07-04 17:01:42.992] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:01:47.993] [board_logger] [error] no emotibit found
+[2026-07-04 17:01:48.069] [board_logger] [info] incoming json: {"file":"","file_anc":"","file_aux":"","ip_address":"","ip_address_anc":"","ip_address_aux":"","ip_port":0,"ip_port_anc":0,"ip_port_aux":0,"ip_protocol":0,"mac_address":"","master_board":-100,"other_info":"","serial_number":"","serial_port":"","timeout":0}
+[2026-07-04 17:01:48.069] [board_logger] [trace] Board object created 47
+[2026-07-04 17:01:48.069] [board_logger] [warning] no ip_address provided, trying to discover network, it may take longer
+[2026-07-04 17:01:48.070] [board_logger] [info] trying broadcast address: 127.255.255.255
+[2026-07-04 17:01:48.070] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:01:53.071] [board_logger] [error] no emotibit found
+[2026-07-04 17:01:53.072] [board_logger] [info] trying broadcast address: 10.23.127.255
+[2026-07-04 17:01:53.072] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:01:58.074] [board_logger] [error] no emotibit found
+[2026-07-04 17:01:58.074] [board_logger] [info] trying broadcast address: 169.254.255.255
+[2026-07-04 17:01:58.074] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:02:03.076] [board_logger] [error] no emotibit found
+[2026-07-04 17:02:03.141] [board_logger] [info] incoming json: {"file":"","file_anc":"","file_aux":"","ip_address":"","ip_address_anc":"","ip_address_aux":"","ip_port":0,"ip_port_anc":0,"ip_port_aux":0,"ip_protocol":0,"mac_address":"","master_board":-100,"other_info":"","serial_number":"","serial_port":"","timeout":0}
+[2026-07-04 17:02:03.141] [board_logger] [trace] Board object created 47
+[2026-07-04 17:02:03.141] [board_logger] [warning] no ip_address provided, trying to discover network, it may take longer
+[2026-07-04 17:02:03.141] [board_logger] [info] trying broadcast address: 127.255.255.255
+[2026-07-04 17:02:03.141] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:02:08.141] [board_logger] [error] no emotibit found
+[2026-07-04 17:02:08.142] [board_logger] [info] trying broadcast address: 10.23.127.255
+[2026-07-04 17:02:08.142] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:02:13.142] [board_logger] [error] no emotibit found
+[2026-07-04 17:02:13.144] [board_logger] [info] trying broadcast address: 169.254.255.255
+[2026-07-04 17:02:13.144] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:02:18.145] [board_logger] [error] no emotibit found
+[2026-07-04 17:02:18.187] [board_logger] [info] incoming json: {"file":"","file_anc":"","file_aux":"","ip_address":"","ip_address_anc":"","ip_address_aux":"","ip_port":0,"ip_port_anc":0,"ip_port_aux":0,"ip_protocol":0,"mac_address":"","master_board":-100,"other_info":"","serial_number":"","serial_port":"","timeout":0}
+[2026-07-04 17:02:18.187] [board_logger] [trace] Board object created 47
+[2026-07-04 17:02:18.188] [board_logger] [warning] no ip_address provided, trying to discover network, it may take longer
+[2026-07-04 17:02:18.188] [board_logger] [info] trying broadcast address: 127.255.255.255
+[2026-07-04 17:02:18.188] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:02:23.189] [board_logger] [error] no emotibit found
+[2026-07-04 17:02:23.189] [board_logger] [info] trying broadcast address: 10.23.127.255
+[2026-07-04 17:02:23.189] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:02:28.190] [board_logger] [error] no emotibit found
+[2026-07-04 17:02:28.190] [board_logger] [info] trying broadcast address: 169.254.255.255
+[2026-07-04 17:02:28.190] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:02:33.192] [board_logger] [error] no emotibit found
+[2026-07-04 17:02:34.010] [board_logger] [info] incoming json: {"file":"","file_anc":"","file_aux":"","ip_address":"","ip_address_anc":"","ip_address_aux":"","ip_port":0,"ip_port_anc":0,"ip_port_aux":0,"ip_protocol":0,"mac_address":"","master_board":-100,"other_info":"","serial_number":"","serial_port":"","timeout":0}
+[2026-07-04 17:02:34.010] [board_logger] [trace] Board object created 47
+[2026-07-04 17:02:34.010] [board_logger] [warning] no ip_address provided, trying to discover network, it may take longer
+[2026-07-04 17:02:34.010] [board_logger] [info] trying broadcast address: 127.255.255.255
+[2026-07-04 17:02:34.010] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:02:39.011] [board_logger] [error] no emotibit found
+[2026-07-04 17:02:39.012] [board_logger] [info] trying broadcast address: 10.23.127.255
+[2026-07-04 17:02:39.012] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:02:44.013] [board_logger] [error] no emotibit found
+[2026-07-04 17:02:44.014] [board_logger] [info] trying broadcast address: 169.254.255.255
+[2026-07-04 17:02:44.014] [board_logger] [info] sending package: 0,0,0,HE,1,100
+
+[2026-07-04 17:02:49.015] [board_logger] [error] no emotibit found
