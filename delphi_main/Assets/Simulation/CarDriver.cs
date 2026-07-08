@@ -1,19 +1,49 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Delphi.Simulation
 {
     /// <summary>
-    /// The four driving-style parameters, normalised 0..1 (gentle..assertive).
-    /// Physical ranges are grounded in the AV comfort literature we reviewed —
-    /// tune the min/max fields during piloting.
+    /// The driving-style parameters, normalised 0..1. Convention across
+    /// EVERY axis: 0 = gentle, 1 = assertive — the optimiser sees a uniform
+    /// direction. Physical ranges grounded in the AV comfort literature we
+    /// reviewed; tune the min/max fields during piloting.
+    ///
+    /// All mapped values are computed PROPERTIES read fresh every frame —
+    /// never cached — so dragging any slider mid-Play changes behaviour
+    /// immediately.
+    ///
+    /// followDistance and takeoverProbability are part of the thesis
+    /// parameter set but currently INERT — they need other traffic to act
+    /// on, and the traffic system is deliberately parked while the core
+    /// drive loop is being validated step by step.
     /// </summary>
     [System.Serializable]
     public class DrivingParameters
     {
-        [Range(0f, 1f)] public float accelerationJerk = 0.5f;
-        [Range(0f, 1f)] public float brakingJerk      = 0.5f;
-        [Range(0f, 1f)] public float followDistance   = 0.5f;
-        [Range(0f, 1f)] public float corneringSpeed    = 0.5f;
+        [Header("Toggles — untick to remove a parameter's influence entirely")]
+        [Tooltip("Off = acceleration changes are instant (no jerk shaping " +
+                 "on the accelerating side).")]
+        public bool accelerationJerkOn    = true;
+        [Tooltip("Off = braking changes are instant (no jerk shaping on the " +
+                 "braking side).")]
+        public bool brakingJerkOn         = true;
+        [Tooltip("Off = ignore any lead vehicle (headway control skipped).")]
+        public bool followDistanceOn      = true;
+        [Tooltip("Off = no curvature slowdown; corners taken at cruise speed.")]
+        public bool corneringSpeedOn      = true;
+        [Tooltip("Inert until the takeover system returns; kept for symmetry.")]
+        public bool takeoverProbabilityOn = true;
+        [Tooltip("Off = cruise exactly at the posted limit (zero margin).")]
+        public bool speedBelowLimitOn     = true;
+
+        [Header("Values (0 = gentle, 1 = assertive)")]
+        [Range(0f, 1f)] public float accelerationJerk    = 0.5f;
+        [Range(0f, 1f)] public float brakingJerk         = 0.5f;
+        [Range(0f, 1f)] public float followDistance      = 0.5f;
+        [Range(0f, 1f)] public float corneringSpeed      = 0.5f;
+        [Range(0f, 1f)] public float takeoverProbability = 0.5f;
+        [Range(0f, 1f)] public float speedBelowLimit     = 0.5f;
 
         [Header("Acceleration jerk range (m/s^3)")]
         public float accelJerkMin = 0.3f;
@@ -32,40 +62,50 @@ namespace Delphi.Simulation
         public float cornerMin = 0.6f;  // gentle: slow in
         public float cornerMax = 1.15f; // assertive: pushes past comfy
 
-        public float AccelJerk      => Mathf.Lerp(accelJerkMin, accelJerkMax, accelerationJerk);
-        public float BrakeJerk      => Mathf.Lerp(brakeJerkMin, brakeJerkMax, brakingJerk);
-        public float FollowHeadway  => Mathf.Lerp(followMax, followMin, followDistance); // inverted
-        public float CornerFactor   => Mathf.Lerp(cornerMin, cornerMax, corneringSpeed);
+        [Header("Speed below limit range (km/h under the posted limit)")]
+        [Tooltip("Gentle = a big margin below the limit, so this axis is " +
+                 "inverted when mapped: 0 → belowLimitMaxKmh under, 1 → at " +
+                 "the limit.")]
+        public float belowLimitMinKmh = 0f;   // assertive: at the limit
+        public float belowLimitMaxKmh = 15f;  // gentle: well under
+
+        // Effectively "no jerk limit" — high enough that MoveTowards reaches
+        // any plausible target acceleration within one frame.
+        private const float InstantJerk = 1e5f;
+
+        public bool AnyOn => accelerationJerkOn || brakingJerkOn || followDistanceOn ||
+                             corneringSpeedOn || takeoverProbabilityOn || speedBelowLimitOn;
+
+        public float AccelJerk          => accelerationJerkOn ? Mathf.Lerp(accelJerkMin, accelJerkMax, accelerationJerk) : InstantJerk;
+        public float BrakeJerk          => brakingJerkOn ? Mathf.Lerp(brakeJerkMin, brakeJerkMax, brakingJerk) : InstantJerk;
+        public float FollowHeadway      => Mathf.Lerp(followMax, followMin, followDistance);       // inverted
+        public float CornerFactor       => Mathf.Lerp(cornerMin, cornerMax, corneringSpeed);
+        public float SpeedBelowLimitKmh => speedBelowLimitOn ? Mathf.Lerp(belowLimitMaxKmh, belowLimitMinKmh, speedBelowLimit) : 0f; // inverted
+        public float TakeoverProbability => takeoverProbability;
     }
 
     /// <summary>
-    /// Drives the car across RouteStitcher's ordered tile sequence.
+    /// The ego AV. Drives the Track in route space (see RouteVehicle):
+    /// jerk-limited speed control, continuous curvature-based corner
+    /// slowdown (the geometry IS the corner — no corner events), and cruise
+    /// speed derived from the local posted limit minus the speedBelowLimit
+    /// parameter.
     ///
-    /// Speed is jerk-limited (acceleration RAMPS toward its target, capped by
-    /// a rate-of-change limit) rather than set directly — that's what makes
-    /// accelerationJerk/brakingJerk control ABRUPTNESS, not just magnitude.
-    ///
-    /// Corner slowdown and the red-light stop/wait/go both read directly from
-    /// the tile data already authored on each RouteTile — no duplicate config.
-    ///
-    /// Follow distance has a hook (LeadCarGap) but no effect yet, since no
-    /// lead-car object exists in the scene yet — that's the next build step,
-    /// not this file.
+    /// RED LIGHTS — the stop-line guarantee. Wherever the RedLight marker
+    /// sits is treated like the line painted on the pavement:
+    ///   1. On approach, target speed is capped by v = √(2·a·d) toward the
+    ///      line, so the car brakes smoothly and arrives slow.
+    ///   2. The frame the car's motion WOULD carry it across the line, its
+    ///      position is clamped exactly ONTO the line and the wait begins.
+    /// The old version instead let the car drive past and only "noticed"
+    /// once speed dropped below a threshold, then warped it back — that's
+    /// the stop-past-then-snap-back the researcher saw. The clamp makes
+    /// overshoot structurally impossible.
     /// </summary>
-    public class CarDriver : MonoBehaviour
+    public class CarDriver : RouteVehicle
     {
-        [Header("Links")]
-        public RouteStitcher route;
-        [Tooltip("Defaults to this GameObject's own transform.")]
-        public Transform car;
-
         [Header("Parameters (normally driven by the optimiser)")]
         public DrivingParameters parameters = new DrivingParameters();
-
-        [Header("Baseline speed")]
-        [Tooltip("Cruise speed on open road. All four parameters modulate " +
-                 "deviations from this baseline.")]
-        public float baselineSpeedKmh = 40f;
 
         [Header("Physical ceilings (fixed safety bounds, not optimised)")]
         public float maxAccel = 3.0f;  // m/s^2
@@ -75,219 +115,173 @@ namespace Delphi.Simulation
         [Tooltip("Baseline comfortable lateral acceleration (m/s^2) used to " +
                  "derive a safe corner speed from curvature.")]
         public float comfyLateralAccel = 2.0f;
+        [Tooltip("How far ahead (m) curvature is sampled so the car slows " +
+                 "INTO bends rather than inside them.")]
+        public float cornerLookaheadMeters = 15f;
 
-        [Header("Follow distance (hook — inert until a lead car exists)")]
-        [Tooltip("Distance in metres to a lead car, fed by a future LeadCar " +
-                 "script. -1 = no lead car detected.")]
+        [Header("Follow distance (inert hook — no traffic system right now)")]
+        [Tooltip("Bumper-to-bumper distance to a vehicle ahead. -1 = nothing " +
+                 "ahead. Will be fed live again when traffic returns.")]
         public float leadCarGap = -1f;
         public float leadCarSpeedEstimate = 0f; // m/s
+
+        [Header("Red lights")]
+        [Tooltip("Fraction of maxDecel used for the anticipatory approach " +
+                 "curve — below 1 so planned stops feel calmer than " +
+                 "emergency ones.")]
+        [Range(0.2f, 1f)] public float planningDecelFactor = 0.6f;
+
+        [Header("Linear mode (all parameter toggles off)")]
+        [Tooltip("With every DrivingParameters toggle unticked the brain is " +
+                 "bypassed entirely: the car glides through the whole track " +
+                 "at this constant speed — no red lights, no corner " +
+                 "slowdown, no speed limits. A clean baseline pass, e.g. for " +
+                 "testing recording/playback.")]
+        public float linearSpeedKmh = 40f;
 
         [Header("Debug")]
         public bool logStateChanges = false;
 
-        // ── Runtime state ────────────────────────────────────────────
-        private int   _tileIndex;
-        private float _t;            // 0..1 within the current tile
-        private float _tileLength;   // cached arc length of current tile (m)
-        private float _speed;        // m/s
-        private float _acceleration; // m/s^2, jerk-limited
-
+        // ── Runtime state ───────────────────────────────────────────────
         private bool  _waitingAtRedLight;
         private float _waitTimer;
+        private readonly HashSet<TrackEvent> _servedLights = new();
+        private bool _finished;
 
-        public float CurrentSpeedKmh => _speed * 3.6f;
-        public RouteTile CurrentTile =>
-            (route != null && route.OrderedTiles.Count > 0)
-                ? route.OrderedTiles[Mathf.Clamp(_tileIndex, 0, route.OrderedTiles.Count - 1)]
-                : null;
-
-        private void Awake()
-        {
-            if (car == null) car = transform;
-        }
+        public float CurrentSpeedKmh => Speed * 3.6f;
 
         private void Start()
         {
-            if (route == null)
-            {
-                Debug.LogError("[CarDriver] No RouteStitcher assigned.");
-                enabled = false;
-                return;
-            }
-
-            // RouteStitcher builds the route in its own Start(); Unity doesn't
-            // guarantee which Start() runs first, so defer one frame if the
-            // route isn't ready yet rather than assuming ordering.
-            if (route.OrderedTiles.Count == 0)
-                Invoke(nameof(EnterFirstTile), 0f);
-            else
-                EnterFirstTile();
+            if (track.IsReady) OnTrackReady();
+            else track.OnTrackReady += OnTrackReady;
         }
 
-        private void EnterFirstTile()
+        private void OnTrackReady()
         {
-            if (route.OrderedTiles.Count == 0)
-            {
-                Debug.LogError("[CarDriver] Route still has no tiles — did RouteStitcher.Build() run?");
-                return;
-            }
-            _tileIndex = 0;
-            _t = 0f;
-            _tileLength = EstimateTileLength(CurrentTile);
-            car.position = CurrentTile.EntryPosition;
+            PlaceAt(0f, 0f);
+            _servedLights.Clear();
+            _finished = false;
         }
 
         private void Update()
         {
-            var tile = CurrentTile;
-            if (tile == null) return;
-
+            if (!track.IsReady || _finished) return;
             float dt = Time.deltaTime;
+
+            // ── Linear mode: no parameters, no brain ──────────────────
+            // Every toggle off means "just show me the track": constant
+            // speed A→B, ignoring lights, corners and limits.
+            if (!parameters.AnyOn)
+            {
+                _waitingAtRedLight = false;
+                Speed = linearSpeedKmh / 3.6f;
+                Acceleration = 0f;
+                S += Speed * dt;
+                if (S >= track.TotalLength)
+                {
+                    S = track.TotalLength;
+                    _finished = true;
+                    if (logStateChanges) Debug.Log("[CarDriver] Reached the end of the track (linear mode).");
+                }
+                PlaceOnRoute(dt);
+                return;
+            }
 
             // ── Holding at a red light ───────────────────────────────
             if (_waitingAtRedLight)
             {
-                _speed = 0f;
+                HoldStopped();
                 _waitTimer -= dt;
                 if (_waitTimer <= 0f)
                 {
                     _waitingAtRedLight = false;
-                    if (logStateChanges) Debug.Log($"[CarDriver] Pulling away from {tile.name}.");
+                    if (logStateChanges) Debug.Log("[CarDriver] Pulling away from red light.");
                 }
                 return;
             }
 
             // ── Target speed this frame, then jerk-limit toward it ───
-            float targetSpeed = ComputeTargetSpeed(tile);
-            float speedGap = targetSpeed - _speed;
-            float desiredAccel = Mathf.Clamp(speedGap / Mathf.Max(dt, 0.0001f), -maxDecel, maxAccel);
-            float jerkLimit = desiredAccel >= _acceleration ? parameters.AccelJerk : parameters.BrakeJerk;
-            _acceleration = Mathf.MoveTowards(_acceleration, desiredAccel, jerkLimit * dt);
-            _speed = Mathf.Max(0f, _speed + _acceleration * dt);
+            float targetSpeed = ComputeTargetSpeed();
+            StepSpeed(targetSpeed, parameters.AccelJerk, parameters.BrakeJerk,
+                      maxAccel, maxDecel, dt);
 
-            // ── Advance along the tile by real distance travelled ────
-            if (_tileLength > 0.01f)
-                _t += (_speed * dt) / _tileLength;
-
-            // ── Reached the red light's stop point? ──────────────────
-            if (tile.kind == TileKind.RedLight && _t >= tile.stopPointT && _speed < 0.15f)
+            // ── Advance, but NEVER across an unserved stop line ──────
+            // The stop line is exactly where the marker sits. If this
+            // frame's motion would carry the car past it, the car lands ON
+            // it instead and the wait starts — that's what makes the stop
+            // position exact regardless of speed, frame rate, or how gentle
+            // the braking parameters are.
+            float newS = S + Speed * dt;
+            if (track.TryNextRedLight(_servedLights, out float stopS, out TrackEvent light)
+                && newS >= stopS)
             {
-                _t = tile.stopPointT;
+                S = stopS;
                 _waitingAtRedLight = true;
-                _waitTimer = tile.waitDuration;
-                if (logStateChanges) Debug.Log($"[CarDriver] Stopped at {tile.name}, waiting {tile.waitDuration}s.");
-                PositionCar(tile, _t);
+                _waitTimer = light.waitDuration;
+                _servedLights.Add(light);
+                HoldStopped();
+                if (logStateChanges)
+                    Debug.Log($"[CarDriver] Stopped at red light (s={stopS:F0}m), waiting {light.waitDuration}s.");
+                PlaceOnRoute(dt);
                 return;
             }
+            S = newS;
 
-            if (_t >= 1f) AdvanceToNextTile();
-            else PositionCar(tile, _t);
-        }
-
-        private void PositionCar(RouteTile tile, float t)
-        {
-            t = Mathf.Clamp01(t);
-            car.position = tile.Evaluate(t);
-
-            float h = 0.01f;
-            Vector3 a = tile.Evaluate(Mathf.Clamp01(t - h));
-            Vector3 b = tile.Evaluate(Mathf.Clamp01(t + h));
-            Vector3 fwd = b - a;
-            fwd.y = 0f;
-            if (fwd.sqrMagnitude > 1e-6f)
-                car.rotation = Quaternion.Slerp(car.rotation, Quaternion.LookRotation(fwd, Vector3.up), 10f * Time.deltaTime);
-        }
-
-        private void AdvanceToNextTile()
-        {
-            _tileIndex++;
-            if (_tileIndex >= route.OrderedTiles.Count)
+            // ── End of the track ─────────────────────────────────────
+            if (S >= track.TotalLength)
             {
-                if (logStateChanges) Debug.Log("[CarDriver] Reached the end of the route.");
-                _tileIndex = route.OrderedTiles.Count - 1;
-                PositionCar(CurrentTile, 1f);
-                enabled = false;
-                return;
+                S = track.TotalLength;
+                _finished = true;
+                if (logStateChanges) Debug.Log("[CarDriver] Reached the end of the track.");
             }
 
-            _t = 0f;
-            _tileLength = EstimateTileLength(CurrentTile);
-            PositionCar(CurrentTile, 0f);
-            if (logStateChanges) Debug.Log($"[CarDriver] Entering {CurrentTile.name} ({CurrentTile.kind}).");
+            PlaceOnRoute(dt);
         }
 
-        // ── Target speed, per event kind ─────────────────────────────
-        private float ComputeTargetSpeed(RouteTile tile)
+        // ── Target speed from road knowledge ────────────────────────────
+        private float ComputeTargetSpeed()
         {
-            float cruise = baselineSpeedKmh / 3.6f;
-            float target = cruise;
+            // Cruise: posted limit minus the style-dependent margin.
+            float cruiseKmh = Mathf.Max(5f, track.SpeedLimitAt(S) - parameters.SpeedBelowLimitKmh);
+            float target = cruiseKmh / 3.6f;
 
-            // Corner: slow within the scored bend range, based on curvature,
-            // scaled by the corneringSpeed parameter.
-            if (tile.kind == TileKind.Corner && _t >= tile.cornerStartT && _t <= tile.cornerEndT)
+            // Corners: continuous curvature limit, sampled here and a little
+            // ahead so braking starts before the bend.
+            float curvature = parameters.corneringSpeedOn
+                ? Mathf.Max(track.CurvatureAt(S),
+                            track.CurvatureAt(S + cornerLookaheadMeters))
+                : 0f;
+            if (curvature > 0.0001f)
             {
-                float curvature = SampleCurvature(tile, _t);
-                if (curvature > 0.0001f)
-                {
-                    float allowedLateral = comfyLateralAccel * parameters.CornerFactor;
-                    float cornerLimit = Mathf.Sqrt(allowedLateral / curvature);
-                    target = Mathf.Min(target, cornerLimit);
-                }
+                float allowedLateral = comfyLateralAccel * parameters.CornerFactor;
+                target = Mathf.Min(target, Mathf.Sqrt(allowedLateral / curvature));
             }
 
-            // Red light: anticipatory braking curve toward the stop point —
-            // v = sqrt(2 * decel * distanceRemaining), so it slows smoothly
-            // in advance rather than braking hard at the last second.
-            if (tile.kind == TileKind.RedLight && _t < tile.stopPointT)
+            // Red light: anticipatory braking curve toward the stop line —
+            // v = √(2 · decel · distanceRemaining), slowing smoothly in
+            // advance rather than braking hard at the last second. Distance
+            // clamps at 0, so even if the line is somehow reached at speed
+            // the commanded target is 0 (the hard position clamp in Update
+            // is the actual guarantee).
+            if (track.TryNextRedLight(_servedLights, out float stopS, out _))
             {
-                float distanceRemaining = (tile.stopPointT - _t) * _tileLength;
-                float planningDecel = Mathf.Max(maxDecel * 0.6f, 0.5f);
-                float approachLimit = Mathf.Sqrt(Mathf.Max(0f, 2f * planningDecel * distanceRemaining));
+                float distanceRemaining = Mathf.Max(0f, stopS - S);
+                float planningDecel = Mathf.Max(maxDecel * planningDecelFactor, 0.5f);
+                float approachLimit = Mathf.Sqrt(2f * planningDecel * distanceRemaining);
                 target = Mathf.Min(target, approachLimit);
             }
 
-            // Follow distance: inert until leadCarGap is actually fed by a
-            // lead-car script (next build step).
-            if (leadCarGap >= 0f)
+            // Lead vehicle: soft headway control. Inert until a traffic
+            // system feeds leadCarGap again (-1 = nothing ahead).
+            if (parameters.followDistanceOn && leadCarGap >= 0f)
             {
-                float desiredGap = parameters.FollowHeadway * Mathf.Max(_speed, 1f);
-                if (leadCarGap < desiredGap)
-                    target = Mathf.Min(target, leadCarSpeedEstimate);
+                float headway = parameters.FollowHeadway;
+                float desiredGap = headway * Mathf.Max(Speed, 1f);
+                float followTarget = leadCarSpeedEstimate + (leadCarGap - desiredGap) / headway;
+                target = Mathf.Min(target, Mathf.Max(0f, followTarget));
             }
 
             return Mathf.Max(0f, target);
-        }
-
-        // Curvature from three nearby sampled points — no dependency on any
-        // specific Splines-package curvature API, so it can't silently break
-        // if that surface changes between package versions.
-        private float SampleCurvature(RouteTile tile, float t)
-        {
-            float h = 0.01f;
-            Vector3 a = tile.Evaluate(Mathf.Clamp01(t - h));
-            Vector3 c = tile.Evaluate(t);
-            Vector3 b = tile.Evaluate(Mathf.Clamp01(t + h));
-            Vector3 v1 = c - a, v2 = b - c;
-            v1.y = v2.y = 0f;
-            if (v1.sqrMagnitude < 1e-6f || v2.sqrMagnitude < 1e-6f) return 0f;
-            float angle = Vector3.Angle(v1, v2) * Mathf.Deg2Rad;
-            float arc = v2.magnitude;
-            return arc > 1e-4f ? angle / arc : 0f;
-        }
-
-        private float EstimateTileLength(RouteTile tile, int samples = 20)
-        {
-            if (tile == null) return 1f;
-            float length = 0f;
-            Vector3 prev = tile.Evaluate(0f);
-            for (int i = 1; i <= samples; i++)
-            {
-                float t = (float)i / samples;
-                Vector3 p = tile.Evaluate(t);
-                length += Vector3.Distance(prev, p);
-                prev = p;
-            }
-            return Mathf.Max(length, 0.01f);
         }
     }
 }

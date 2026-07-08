@@ -46,6 +46,20 @@ namespace Delphi
                  "participant experience, so it doesn't need to be every frame.")]
         public float updateInterval = 0.1f;
 
+        [Header("Capture (display 2 recording)")]
+        [Tooltip("If the DashboardDisplay frame slot on DelphiManager is empty, " +
+                 "auto-create a CameraFeedSensor pointed at this dashboard's own " +
+                 "display camera, so display 2 (this dashboard + the recording " +
+                 "controls bar) can be recorded like any other feed. Untick if " +
+                 "you'd rather wire it up manually.")]
+        public bool autoWireDisplayCapture = true;
+
+        // The camera this dashboard renders through — shared with
+        // SessionControlsUI so both canvases end up on the same camera and
+        // both get captured together by the auto-wired CameraFeedSensor.
+        public Camera DisplayCamera { get; private set; }
+        public int UiLayer { get; private set; }
+
         [Header("Grid layout")]
         [Tooltip("Also doubles as the number of waveform samples kept per channel.")]
         public int cellWidth   = 240;
@@ -58,7 +72,10 @@ namespace Delphi
         private readonly Color32 _bg     = new Color32(18, 20, 28, 255);
         private readonly Color32 _grid   = new Color32(38, 42, 54, 255);
         private readonly Color32 _line   = new Color32(70, 220, 160, 255);
-        private readonly Color   _noSig  = new Color(0.45f, 0.45f, 0.45f);
+        // Status colours — must match SessionControlsUI's legend if one exists.
+        private readonly Color _notAttached = new Color(0.45f, 0.45f, 0.45f); // gray  — no sensor plugged in
+        private readonly Color _noSignal    = new Color(0.85f, 0.25f, 0.25f); // red   — plugged in, nothing coming through
+        private readonly Color _disabled    = new Color(0.85f, 0.75f, 0.25f); // yellow — plugged in but toggled off
 
         // One of these per cell — scalar cells use tex/buffer/history for a
         // waveform; frame cells just point the RawImage at the sensor's
@@ -82,7 +99,10 @@ namespace Delphi
         private Font _font;
         private float _timer;
 
-        private void Start()
+        // Awake, not Start: Unity guarantees every object's Awake() runs
+        // before any object's Start() — SessionControlsUI's Start() reads
+        // DisplayCamera/UiLayer, so they must exist before Start-phase begins.
+        private void Awake()
         {
             if (manager == null) manager = FindFirstObjectByType<DelphiManager>();
             if (manager == null)
@@ -99,12 +119,19 @@ namespace Delphi
                 Display.displays[dashboardDisplay].Activate();
 #endif
 
+            UiLayer = LayerMask.NameToLayer("UI");
+            if (UiLayer < 0) UiLayer = 0; // fall back to Default rather than fail
+
             BuildDashboardCamera();
             BuildUI();
+
+            if (autoWireDisplayCapture) AutoWireDisplayCapture();
         }
 
-        // A dedicated camera whose only job is to clear the display every
-        // frame — stops smearing, keeps this off the simulator's view.
+        // Renders the whole display: clears it, and (via ScreenSpaceCamera
+        // canvases on UiLayer) draws the dashboard + controls UI. Kept as a
+        // real scene Camera — rather than a plain Overlay canvas — so a
+        // CameraFeedSensor clone of it can capture display 2 for recording.
         private void BuildDashboardCamera()
         {
             var camGO = new GameObject("Dashboard Camera", typeof(Camera));
@@ -112,9 +139,30 @@ namespace Delphi
             var cam = camGO.GetComponent<Camera>();
             cam.clearFlags      = CameraClearFlags.SolidColor;
             cam.backgroundColor = _bgColor;
-            cam.cullingMask     = 0;
+            cam.cullingMask     = 1 << UiLayer;
             cam.targetDisplay   = dashboardDisplay;
             cam.depth           = 100;
+            DisplayCamera = cam;
+        }
+
+        // If nothing is plugged into DelphiManager's DashboardDisplay slot,
+        // create a CameraFeedSensor mirroring DisplayCamera so display 2
+        // (this dashboard + SessionControlsUI's transport bar) gets recorded
+        // just like any other feed.
+        private void AutoWireDisplayCapture()
+        {
+            var sensorGO = new GameObject("[feed] Dashboard Display Capture", typeof(CameraFeedSensor));
+            sensorGO.transform.SetParent(transform, false);
+            var sensor = sensorGO.GetComponent<CameraFeedSensor>();
+            sensor.sourceCamera = DisplayCamera;
+            manager.AutoWireFrameSlot(FrameChannel.DashboardDisplay, sensor);
+        }
+
+        private static void SetLayerRecursively(Transform t, int layer)
+        {
+            t.gameObject.layer = layer;
+            for (int i = 0; i < t.childCount; i++)
+                SetLayerRecursively(t.GetChild(i), layer);
         }
 
         private void BuildUI()
@@ -123,8 +171,9 @@ namespace Delphi
                 typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
             canvasGO.transform.SetParent(transform, false);
             var canvas = canvasGO.GetComponent<Canvas>();
-            canvas.renderMode    = RenderMode.ScreenSpaceOverlay;
-            canvas.targetDisplay = dashboardDisplay;
+            canvas.renderMode    = RenderMode.ScreenSpaceCamera;
+            canvas.worldCamera   = DisplayCamera;
+            canvas.planeDistance = 1f;
             var scaler = canvasGO.GetComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920, 1080);
@@ -147,21 +196,39 @@ namespace Delphi
                 26, TextAnchor.UpperLeft, new Color(0.85f, 0.9f, 1f),
                 new Vector2(30, -20), new Vector2(800, 34));
 
-            int rowHeight = cellHeight + 34; // header row + content
+            // Two text lines (title, then status/value) stacked above the
+            // content so long labels ("Gaze / Saccade rate", "Not attached")
+            // never overlap each other regardless of length.
+            const float titleLineHeight = 22f;
+            const float valueLineHeight = 20f;
+            int rowHeight = cellHeight + (int)(titleLineHeight + valueLineHeight);
             int cols = Mathf.Max(1, columns);
-            const float leftMargin = 30f;
-            const float topMargin  = 66f;
+            const float topMargin = 66f;
 
             var scalarChannels = DelphiManager.AllChannels;
             var frameChannels  = DelphiManager.AllFrameChannels;
             int totalCells = scalarChannels.Length + frameChannels.Length;
+            int rows = Mathf.CeilToInt(totalCells / (float)cols);
+
+            // Grid container is anchored to the top-center of the canvas so
+            // the whole panel grid stays horizontally centered regardless of
+            // the display's resolution/aspect ratio.
+            float gridWidth  = cols * cellWidth + (cols - 1) * colSpacing;
+            float gridHeight = rows * rowHeight + (rows - 1) * rowSpacing;
+            var gridGO = new GameObject("Grid", typeof(RectTransform));
+            gridGO.transform.SetParent(canvasGO.transform, false);
+            var gridRT = gridGO.GetComponent<RectTransform>();
+            gridRT.anchorMin = gridRT.anchorMax = new Vector2(0.5f, 1f);
+            gridRT.pivot = new Vector2(0.5f, 1f);
+            gridRT.anchoredPosition = new Vector2(0f, -topMargin);
+            gridRT.sizeDelta = new Vector2(gridWidth, gridHeight);
 
             for (int i = 0; i < totalCells; i++)
             {
                 int col = i % cols;
                 int row = i / cols;
-                float posX = leftMargin + col * (cellWidth  + colSpacing);
-                float posY = -topMargin  - row * (rowHeight + rowSpacing);
+                float posX = col * (cellWidth  + colSpacing);
+                float posY = -row * (rowHeight + rowSpacing);
 
                 bool isFrame = i >= scalarChannels.Length;
                 string label, unit, cellName;
@@ -180,20 +247,22 @@ namespace Delphi
                 }
 
                 var container = new GameObject(cellName, typeof(RectTransform));
-                container.transform.SetParent(canvasGO.transform, false);
+                container.transform.SetParent(gridGO.transform, false);
                 var crt = container.GetComponent<RectTransform>();
                 crt.anchorMin = crt.anchorMax = new Vector2(0, 1);
                 crt.pivot = new Vector2(0, 1);
                 crt.anchoredPosition = new Vector2(posX, posY);
                 crt.sizeDelta = new Vector2(cellWidth, rowHeight);
 
+                // Title and status/value each get their own full-width line —
+                // stacked, not side-by-side, so long text never overlaps.
                 var titleText = CreateText(container.transform, $"{label}".TrimEnd(' ', '(', ')'),
-                    17, TextAnchor.UpperLeft, new Color(0.8f, 0.85f, 0.95f),
-                    new Vector2(0, 0), new Vector2(cellWidth * 0.6f, 24));
+                    16, TextAnchor.UpperLeft, new Color(0.8f, 0.85f, 0.95f),
+                    new Vector2(0, 0), new Vector2(cellWidth, titleLineHeight));
 
-                var valueText = CreateText(container.transform, "No signal",
-                    17, TextAnchor.UpperRight, _noSig,
-                    new Vector2(cellWidth * 0.4f, 0), new Vector2(cellWidth * 0.6f, 24));
+                var valueText = CreateText(container.transform, "Not attached",
+                    15, TextAnchor.UpperRight, _notAttached,
+                    new Vector2(0, -titleLineHeight), new Vector2(cellWidth, valueLineHeight));
 
                 var imgGO = new GameObject("Content", typeof(RawImage));
                 imgGO.transform.SetParent(container.transform, false);
@@ -202,7 +271,7 @@ namespace Delphi
                 var irt = imgGO.GetComponent<RectTransform>();
                 irt.anchorMin = irt.anchorMax = new Vector2(0, 1);
                 irt.pivot = new Vector2(0, 1);
-                irt.anchoredPosition = new Vector2(0, -28);
+                irt.anchoredPosition = new Vector2(0, -(titleLineHeight + valueLineHeight));
                 irt.sizeDelta = new Vector2(cellWidth, cellHeight);
 
                 var panel = new Panel
@@ -236,6 +305,8 @@ namespace Delphi
 
                 _panels.Add(panel);
             }
+
+            SetLayerRecursively(canvasGO.transform, UiLayer);
         }
 
         private void Update()
@@ -273,8 +344,13 @@ namespace Delphi
             }
             else
             {
-                p.valueText.text  = "No signal";
-                p.valueText.color = _noSig;
+                var status = manager.GetStatus(p.channel);
+                (p.valueText.text, p.valueText.color) = status switch
+                {
+                    ChannelStatus.Disabled => ("DISABLED", _disabled),
+                    ChannelStatus.NoSignal => ("No signal", _noSignal),
+                    _                      => ("Not attached", _notAttached)
+                };
             }
         }
 
@@ -294,13 +370,18 @@ namespace Delphi
                     float aspect = (float)tex.height / tex.width;
                     p.image.rectTransform.sizeDelta = new Vector2(cellWidth, cellWidth * aspect);
                 }
-                p.valueText.text  = "Live";
+                p.valueText.text  = manager.IsInPlayback ? "Playback" : "Live";
                 p.valueText.color = (Color)_line;
             }
             else
             {
-                p.valueText.text  = "No signal";
-                p.valueText.color = _noSig;
+                var status = manager.GetStatus(p.frameChannel);
+                (p.valueText.text, p.valueText.color) = status switch
+                {
+                    ChannelStatus.Disabled => ("DISABLED", _disabled),
+                    ChannelStatus.NoSignal => ("No signal", _noSignal),
+                    _                      => ("Not attached", _notAttached)
+                };
             }
         }
 
