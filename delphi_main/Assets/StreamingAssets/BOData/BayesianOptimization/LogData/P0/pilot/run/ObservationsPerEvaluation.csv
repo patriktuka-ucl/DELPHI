@@ -1,0 +1,8 @@
+UserID;ConditionID;GroupID;Timestamp;Iteration;Phase;IsPareto;HeartRate;RMSSD;GSR;accelerationJerk;brakingJerk;followDistance;corneringSpeed;takeoverProbability;speedBelowLimit
+P0;pilot;0;2026-07-09 16:13:10;1;sampling;FALSE;4.086;0.151;13.817;0.068;0.225;0.699;0.063;0.375;0.03
+P0;pilot;0;2026-07-09 16:13:10;2;sampling;FALSE;5.875;-10.046;33.236;0.147;0.339;0.27;0.273;0.69;0.389
+P0;pilot;0;2026-07-09 16:13:10;3;sampling;FALSE;1.752;-18.257;39.777;0.786;0.644;0.202;0.634;0.055;0.005
+P0;pilot;0;2026-07-09 16:13:10;4;sampling;FALSE;10.85;-16.321;62.813;0.725;0.248;0.969;0.079;0.548;0.525
+P0;pilot;0;2026-07-09 16:13:12;5;optimization;FALSE;0.702;-2.086;8.346;0.055;0.431;0.489;0.286;0.017;0.0
+P0;pilot;0;2026-07-09 16:13:15;6;optimization;FALSE;-0.981;11.609;-19.827;0.0;0.298;0.041;0.0;0.0;0.0
+P0;pilot;0;2026-07-09 16:13:18;7;optimization;TRUE;-5.0;15.0;-30.0;0.0;0.0;0.0;0.0;0.0;0.0

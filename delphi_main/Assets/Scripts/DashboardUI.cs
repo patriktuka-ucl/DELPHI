@@ -93,6 +93,12 @@ namespace Delphi
 
         private Color32 CurrentLineColor => manager.IsInPlayback ? _linePlayback : _line;
 
+        // Same look-back span live mode effectively shows (cellWidth samples
+        // at one redraw each) — reused so a playback window covers a
+        // comparable amount of time, just filled from real recorded data
+        // instead of a scrolling live buffer.
+        private float HistoryWindowSeconds => cellWidth * Mathf.Max(redrawInterval, 0.001f);
+
         private void Start()
         {
             if (manager == null) manager = FindFirstObjectByType<DelphiManager>();
@@ -311,8 +317,21 @@ namespace Delphi
             bool hasData = manager.HasData(p.channel);
             float value  = manager.GetValue(p.channel);
 
-            System.Array.Copy(p.history, 1, p.history, 0, cellWidth - 1);
-            p.history[cellWidth - 1] = hasData ? value : float.NaN;
+            if (manager.IsInPlayback)
+            {
+                // A real historical window ending at the current playback
+                // position — recomputed fresh every redraw, not shifted.
+                // Correct whether paused (window stays put, exactly as it
+                // should for a frozen instant) or scrubbed anywhere
+                // (including backward, which a live-style FIFO could never
+                // represent honestly).
+                manager.Playback.FillHistory(p.channel, p.history, HistoryWindowSeconds);
+            }
+            else
+            {
+                System.Array.Copy(p.history, 1, p.history, 0, cellWidth - 1);
+                p.history[cellWidth - 1] = hasData ? value : float.NaN;
+            }
 
             RedrawWaveform(p);
 

@@ -163,6 +163,11 @@ namespace Delphi
             return float.IsNaN(s.Current) ? ChannelStatus.NoSignal : ChannelStatus.Live;
         }
 
+        /// <summary>The sensor component plugged into a channel's slot, or
+        /// null if empty. For callers that need more than a value/status —
+        /// e.g. logging which sensor produced a trial's data.</summary>
+        public ScalarSensor GetSensor(Channel ch) => Slot(ch);
+
         public static (string label, string unit) Meta(Channel ch) => ch switch
         {
             Channel.HeartRate     => ("HR",                    "bpm"),

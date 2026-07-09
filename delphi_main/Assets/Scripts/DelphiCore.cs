@@ -19,6 +19,59 @@ namespace Delphi
     }
 
     /// <summary>
+    /// Thread-safe per-channel mean+variance accumulator for a measurement
+    /// window. Created by the trial layer, fed by DelphiCore's sampling
+    /// thread while installed as DelphiCore.Accumulator, then snapshotted on
+    /// the main thread. Means come from the true samples at the true sample
+    /// rate — never from frame-rate polling. Variance uses Welford's
+    /// single-pass streaming algorithm (stable under lock-per-sample
+    /// updates, no need to buffer raw values) — used for baseline standard
+    /// deviation, which the trial layer z-scores each window's delta by.
+    /// </summary>
+    public sealed class WindowAccumulator
+    {
+        private readonly object _lock = new object();
+        private readonly int[] _n = new int[16];
+        private readonly double[] _mean = new double[16];
+        private readonly double[] _m2 = new double[16]; // sum of squared deviations from the running mean
+
+        public void Add(Channel ch, float v)
+        {
+            if (float.IsNaN(v)) return;
+            int i = (int)ch;
+            lock (_lock)
+            {
+                _n[i]++;
+                double delta = v - _mean[i];
+                _mean[i] += delta / _n[i];
+                _m2[i] += delta * (v - _mean[i]);
+            }
+        }
+
+        /// <summary>Mean and sample count for a channel; mean is NaN when no
+        /// samples landed in the window.</summary>
+        public (float mean, int count) Mean(Channel ch)
+        {
+            lock (_lock)
+            {
+                int i = (int)ch;
+                return _n[i] > 0 ? ((float)_mean[i], _n[i]) : (float.NaN, 0);
+            }
+        }
+
+        /// <summary>Sample standard deviation; NaN with fewer than 2 samples
+        /// (variance undefined for a single point).</summary>
+        public float StdDev(Channel ch)
+        {
+            lock (_lock)
+            {
+                int i = (int)ch;
+                return _n[i] > 1 ? (float)Math.Sqrt(_m2[i] / (_n[i] - 1)) : float.NaN;
+            }
+        }
+    }
+
+    /// <summary>
     /// The acquisition engine. Plain C# — no MonoBehaviour, no Unity APIs —
     /// running a dedicated background thread with its own DelphiClock
     /// schedule:
@@ -47,6 +100,11 @@ namespace Delphi
             public volatile float rateHz;
             internal double nextTick;
         }
+
+        // Set by the trial layer for the duration of a measurement window;
+        // the sampling thread feeds every fresh sample into it. Null when no
+        // window is being measured.
+        public volatile WindowAccumulator Accumulator;
 
         private readonly Group[] _groups;
         private readonly Channel[] _csvColumns;
@@ -178,12 +236,17 @@ namespace Delphi
 
         private void SampleGroup(Group g)
         {
+            var acc = Accumulator;
             foreach (var ch in g.channels)
             {
                 if (!_isOn(ch)) continue;
                 var s = _slot(ch);
                 if (s is null) continue; // plain reference check — Unity's overloaded == is main-thread territory
-                try { s.ReadValue(); }
+                try
+                {
+                    float v = s.ReadValue();
+                    acc?.Add(ch, v);
+                }
                 catch (Exception e)
                 {
                     // One misbehaving sensor must never kill the whole

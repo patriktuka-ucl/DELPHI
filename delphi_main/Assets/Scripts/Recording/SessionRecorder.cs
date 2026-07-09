@@ -60,6 +60,9 @@ namespace Delphi
         public bool IsRecording { get; private set; }
         public float ElapsedSeconds => IsRecording ? (float)(DelphiClock.Now - _clockStart) : 0f;
         public string LastSessionPath { get; private set; }
+        /// <summary>Folder of the session being written right now (null when
+        /// idle) — lets the trial layer drop its own logs alongside.</summary>
+        public string CurrentSessionPath => IsRecording ? _sessionPath : null;
 
         public static string DefaultSessionsRoot =>
             Path.Combine(Application.persistentDataPath, "Sessions");

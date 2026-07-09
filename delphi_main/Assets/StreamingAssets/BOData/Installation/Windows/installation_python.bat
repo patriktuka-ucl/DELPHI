@@ -1,0 +1,137 @@
+@echo off
+setlocal enabledelayedexpansion
+
+set PYTHON_EXE="C:\Program Files\Python313\python.exe"
+set TARGET_PY_MAJOR=3
+set TARGET_PY_MINOR=13
+
+cd /d %~dp0
+
+set PYTHON_INSTALLER="Installation_Objects\python-3.13.7.exe"
+set REQUIREMENTS="..\requirements.txt"
+set VC_REDIST_EXE="Installation_Objects\VC_redist.x64.exe"
+
+REM Check if Visual C++ Redistributable is already installed
+reg query "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" >nul 2>&1
+if %errorlevel%==0 (
+    echo Visual C++ Redistributable is already installed.
+    goto check_python
+)
+
+REM Check if Visual C++ Redistributable is already installed
+REM Check for VS 2015-2022 (v14.0 or later)
+reg query "HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" >nul 2>&1
+if %errorlevel%==0 (
+    echo Visual C++ Redistributable is already installed.
+    goto check_python
+)
+
+reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" >nul 2>&1
+if %errorlevel%==0 (
+    echo Visual C++ Redistributable is already installed.
+    goto check_python
+)
+
+
+REM Run the Visual C++ Redistributable installer
+echo Installing Visual C++ Redistributable...
+%VC_REDIST_EXE% /quiet /norestart
+if %errorlevel% neq 0 (
+    echo Warning: Visual C++ Redistributable installation returned error code %errorlevel%
+    echo Continuing anyway...
+)
+
+
+REM Check if the installation was successful
+reg query "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" >nul 2>&1
+if %errorlevel%==0 (
+    echo Visual C++ Redistributable was successfully installed.
+) else (
+    echo Error installing Visual C++ Redistributable.
+    exit /b 1
+)
+
+
+:check_python
+REM Check if Python is already installed
+%PYTHON_EXE% --version >nul 2>&1
+if %errorlevel%==0 (
+    %PYTHON_EXE% -c "import sys; raise SystemExit(0 if sys.version_info[:2]==(%TARGET_PY_MAJOR%,%TARGET_PY_MINOR%) else 1)" >nul 2>&1
+    if %errorlevel%==0 (
+        echo Target Python version %TARGET_PY_MAJOR%.%TARGET_PY_MINOR% is already installed.
+        goto install_packages
+    )
+    echo A different Python version is installed at %PYTHON_EXE%. Re-installing target version...
+    goto install_python
+)
+
+:install_python
+REM Run the Python installer
+echo Installing Python...
+%PYTHON_INSTALLER% /quiet InstallAllUsers=1 PrependPath=1
+
+REM Wait a moment for installation to complete
+timeout /t 5 /nobreak >nul
+
+REM Check if the installation was successful and matches target version
+%PYTHON_EXE% -c "import sys; raise SystemExit(0 if sys.version_info[:2]==(%TARGET_PY_MAJOR%,%TARGET_PY_MINOR%) else 1)" >nul 2>&1
+if %errorlevel%==0 (
+    echo Target Python %TARGET_PY_MAJOR%.%TARGET_PY_MINOR% was successfully installed.
+    goto install_packages
+)
+echo Error installing target Python version %TARGET_PY_MAJOR%.%TARGET_PY_MINOR%.
+exit /b 1
+
+
+:install_packages
+REM Check if requirements file exists
+if not exist %REQUIREMENTS% (
+    echo Error: Requirements file not found at %REQUIREMENTS%
+    pause
+    exit /b 1
+)
+
+
+REM Ensure pip is available without upgrading package tooling at install time
+echo Checking Pip...
+%PYTHON_EXE% -m pip --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Installing bundled Pip...
+    %PYTHON_EXE% -m ensurepip --upgrade
+    if %errorlevel% neq 0 (
+        echo Error: Pip installation failed.
+        pause
+        exit /b 1
+    )
+)
+
+REM Install packages
+set PIP_INSTALL_SCOPE=--user
+net session >nul 2>&1
+if %errorlevel%==0 (
+    echo Running elevated; installing packages into the all-users Python environment.
+    set PIP_INSTALL_SCOPE=
+) else (
+    echo Running as standard user; installing packages into the current user site-packages.
+)
+echo Installing packages from %REQUIREMENTS%...
+%PYTHON_EXE% -m pip install %PIP_INSTALL_SCOPE% -r %REQUIREMENTS%
+if %errorlevel% neq 0 (
+    echo Error: Package installation failed.
+    pause
+    exit /b 1
+)
+
+%PYTHON_EXE% -m pip check
+if %errorlevel% neq 0 (
+    echo Error: Installed packages have dependency conflicts.
+    pause
+    exit /b 1
+)
+
+echo.
+echo ========================================
+echo Installation completed successfully!
+echo ========================================
+pause
+exit /b 0

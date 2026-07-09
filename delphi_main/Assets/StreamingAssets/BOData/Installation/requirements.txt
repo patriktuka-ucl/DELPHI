@@ -1,0 +1,10 @@
+torch==2.12.1
+botorch==0.18.1
+moocore==0.3.1
+scipy==1.18.0
+numpy==2.5.0
+matplotlib==3.11.0
+pandas==3.0.3
+gpytorch==1.15.2
+scikit-learn==1.9.0
+loguru==0.7.3

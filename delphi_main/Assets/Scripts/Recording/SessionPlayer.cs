@@ -190,6 +190,16 @@ namespace Delphi
             Seek(TimeSec + n / (float)Meta.fps);
         }
 
+        /// <summary>Coarse skip by a fixed number of seconds (not frame-
+        /// accurate) — for quickly jumping around a long recording. Pauses
+        /// first, same as StepFrames.</summary>
+        public void StepSeconds(float seconds)
+        {
+            if (!IsLoaded) return;
+            Pause();
+            Seek(TimeSec + seconds);
+        }
+
         public void SetSpeed(float speed)
         {
             PlaybackSpeed = Mathf.Clamp(speed, 0.1f, 8f);
@@ -229,6 +239,34 @@ namespace Delphi
                 _times == null || _times.Length == 0)
                 return float.NaN;
             return vals[SampleIndexAt(TimeSec)];
+        }
+
+        /// <summary>Fills `outBuffer` with `outBuffer.Length` samples of `ch`,
+        /// evenly spaced across the `windowSeconds` ending AT the current
+        /// playback time (hold-last-sample lookup per point, same rule as
+        /// GetValue) — a real historical window, not a live-style scrolling
+        /// buffer. Points before recording start (t &lt; 0) are NaN, so a
+        /// window near the beginning of the session correctly shows a
+        /// partially-empty graph rather than fabricated data. Used by the
+        /// dashboard so pausing/scrubbing shows the graph AS OF that moment
+        /// instead of continuing to shift as if time were still advancing.</summary>
+        public void FillHistory(Channel ch, float[] outBuffer, float windowSeconds)
+        {
+            int n = outBuffer.Length;
+            if (n == 0) return;
+            if (!IsLoaded || !_values.TryGetValue(ch, out var vals) || _times == null || _times.Length == 0)
+            {
+                for (int i = 0; i < n; i++) outBuffer[i] = float.NaN;
+                return;
+            }
+
+            float windowStart = TimeSec - windowSeconds;
+            for (int i = 0; i < n; i++)
+            {
+                // Rightmost sample (i == n-1) lands exactly on TimeSec.
+                float t = n == 1 ? TimeSec : windowStart + windowSeconds * i / (n - 1);
+                outBuffer[i] = t < 0f ? float.NaN : vals[SampleIndexAt(t)];
+            }
         }
 
         public bool HasFrame(FrameChannel ch) => IsLoaded && FindFeed(ch) != null;

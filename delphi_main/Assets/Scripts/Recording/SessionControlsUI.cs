@@ -44,6 +44,10 @@ namespace Delphi
         [Tooltip("Panel size in canvas reference units.")]
         public Vector2 panelSize = new Vector2(1180f, 150f);
 
+        [Tooltip("Seconds skipped by the coarse ± buttons (the second, " +
+                 "faster pair next to the frame-accurate -1f/+1f).")]
+        public float coarseStepSeconds = 1f;
+
         private static readonly float[] Speeds = { 0.25f, 0.5f, 1f, 2f, 4f };
 
         private readonly Color _bgColor     = new Color(0.06f, 0.07f, 0.10f, 1f);
@@ -59,6 +63,8 @@ namespace Delphi
         private InputField _nameField;
         private Text _sessionLabel, _playButtonText, _speedButtonText, _timeLabel;
         private Button _loadButton, _playButton, _stepBackButton, _stepFwdButton, _speedButton;
+        private Button _coarseBackButton, _coarseFwdButton;
+        private Text _coarseBackText, _coarseFwdText;
         private Text _loadButtonText;
         private Slider _scrubber;
         private bool _scrubbing;
@@ -157,12 +163,24 @@ namespace Delphi
                 _playButton.interactable     = loaded;
                 _stepBackButton.interactable = loaded;
                 _stepFwdButton.interactable  = loaded;
+                _coarseBackButton.interactable = loaded;
+                _coarseFwdButton.interactable  = loaded;
                 _speedButton.interactable    = loaded;
                 _scrubber.interactable       = loaded;
 
+                _coarseBackText.text = $"-{coarseStepSeconds:0.#}s";
+                _coarseFwdText.text  = $"+{coarseStepSeconds:0.#}s";
+
                 if (loaded)
                 {
-                    _timeLabel.text = $"{FormatTime(player.TimeSec)} / {FormatTime(player.Duration)}";
+                    string frameInfo = "";
+                    if (player.Meta != null && player.Meta.fps > 0)
+                    {
+                        int frame = Mathf.RoundToInt(player.TimeSec * player.Meta.fps);
+                        int totalFrames = Mathf.RoundToInt(player.Duration * player.Meta.fps);
+                        frameInfo = $"   f{frame}/{totalFrames}";
+                    }
+                    _timeLabel.text = $"{FormatTime(player.TimeSec)} / {FormatTime(player.Duration)}{frameInfo}";
                     if (!_scrubbing && player.Duration > 0f)
                         _scrubber.SetValueWithoutNotify(player.TimeSec / player.Duration);
                 }
@@ -246,11 +264,19 @@ namespace Delphi
             (_stepFwdButton, _, _) =
                 CreateButton(panel.transform, "+1f", new Vector2(622, y), new Vector2(52, 34),
                              () => player?.StepFrames(1));
+            // Coarse skip — second, faster pair alongside the frame-accurate
+            // -1f/+1f, for jumping around a long recording quickly.
+            (_coarseBackButton, _, _coarseBackText) =
+                CreateButton(panel.transform, "-1s", new Vector2(678, y), new Vector2(56, 34),
+                             () => player?.StepSeconds(-coarseStepSeconds));
+            (_coarseFwdButton, _, _coarseFwdText) =
+                CreateButton(panel.transform, "+1s", new Vector2(734, y), new Vector2(56, 34),
+                             () => player?.StepSeconds(coarseStepSeconds));
             (_speedButton, _, _speedButtonText) =
-                CreateButton(panel.transform, "1x", new Vector2(678, y), new Vector2(60, 34),
+                CreateButton(panel.transform, "1x", new Vector2(794, y), new Vector2(60, 34),
                              () => CycleSpeed(_speedIdx >= Speeds.Length - 1 ? -(Speeds.Length - 1) : 1));
             _timeLabel = CreateText(panel.transform, "--:-- / --:--", 16, TextAnchor.MiddleLeft, _dim,
-                new Vector2(756, y), new Vector2(260, 34));
+                new Vector2(858, y), new Vector2(300, 34));
 
             // Row 3 — scrubber.
             _scrubber = CreateSlider(panel.transform, new Vector2(14, -104), new Vector2(1152, 26));

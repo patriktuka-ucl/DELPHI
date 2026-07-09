@@ -47,3 +47,6 @@ sysinfo.txt
 Icon?
 ehthumbs.db
 Thumbs.db
+
+# BO-for-Unity local Python environment (recreate: python3.13 -m venv BOPythonEnv && BOPythonEnv/bin/pip install -r Assets/StreamingAssets/BOData/Installation/requirements.txt ninja)
+delphi_main/BOPythonEnv/
