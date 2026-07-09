@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 using UnityEngine.UI;
 
 namespace Delphi
@@ -41,24 +42,13 @@ namespace Delphi
             "actual build with a real second monitor.")]
         public Vector2 editorPreviewOffset = Vector2.zero;
 
-        [Header("Update")]
-        [Tooltip("Seconds between redraws. This is a monitoring view, not the " +
-                 "participant experience, so it doesn't need to be every frame.")]
-        public float updateInterval = 0.1f;
-
-        [Header("Capture (display 2 recording)")]
-        [Tooltip("If the DashboardDisplay frame slot on DelphiManager is empty, " +
-                 "auto-create a CameraFeedSensor pointed at this dashboard's own " +
-                 "display camera, so display 2 (this dashboard + the recording " +
-                 "controls bar) can be recorded like any other feed. Untick if " +
-                 "you'd rather wire it up manually.")]
-        public bool autoWireDisplayCapture = true;
-
-        // The camera this dashboard renders through — shared with
-        // SessionControlsUI so both canvases end up on the same camera and
-        // both get captured together by the auto-wired CameraFeedSensor.
-        public Camera DisplayCamera { get; private set; }
-        public int UiLayer { get; private set; }
+        [Header("Redraw (view only — does NOT affect sampling or recording)")]
+        [Tooltip("Seconds between dashboard redraws. This only throttles how " +
+                 "often this monitoring view repaints; it has no effect on how " +
+                 "often sensors are sampled or what ends up in a recording — " +
+                 "that is entirely controlled by DelphiManager's own sample-rate settings.")]
+        [FormerlySerializedAs("updateInterval")]
+        public float redrawInterval = 0.1f;
 
         [Header("Grid layout")]
         [Tooltip("Also doubles as the number of waveform samples kept per channel.")]
@@ -71,7 +61,8 @@ namespace Delphi
         private readonly Color  _bgColor = new Color(0.06f, 0.07f, 0.10f, 1f);
         private readonly Color32 _bg     = new Color32(18, 20, 28, 255);
         private readonly Color32 _grid   = new Color32(38, 42, 54, 255);
-        private readonly Color32 _line   = new Color32(70, 220, 160, 255);
+        private readonly Color32 _line          = new Color32(70, 220, 160, 255); // live — green
+        private readonly Color32 _linePlayback   = new Color32(80, 160, 235, 255); // playback — blue
         // Status colours — must match SessionControlsUI's legend if one exists.
         private readonly Color _notAttached = new Color(0.45f, 0.45f, 0.45f); // gray  — no sensor plugged in
         private readonly Color _noSignal    = new Color(0.85f, 0.25f, 0.25f); // red   — plugged in, nothing coming through
@@ -98,11 +89,11 @@ namespace Delphi
         private readonly List<Panel> _panels = new();
         private Font _font;
         private float _timer;
+        private string _lastPlaybackSignature; // detects Load / Eject / switch-session
 
-        // Awake, not Start: Unity guarantees every object's Awake() runs
-        // before any object's Start() — SessionControlsUI's Start() reads
-        // DisplayCamera/UiLayer, so they must exist before Start-phase begins.
-        private void Awake()
+        private Color32 CurrentLineColor => manager.IsInPlayback ? _linePlayback : _line;
+
+        private void Start()
         {
             if (manager == null) manager = FindFirstObjectByType<DelphiManager>();
             if (manager == null)
@@ -119,19 +110,12 @@ namespace Delphi
                 Display.displays[dashboardDisplay].Activate();
 #endif
 
-            UiLayer = LayerMask.NameToLayer("UI");
-            if (UiLayer < 0) UiLayer = 0; // fall back to Default rather than fail
-
             BuildDashboardCamera();
             BuildUI();
-
-            if (autoWireDisplayCapture) AutoWireDisplayCapture();
         }
 
-        // Renders the whole display: clears it, and (via ScreenSpaceCamera
-        // canvases on UiLayer) draws the dashboard + controls UI. Kept as a
-        // real scene Camera — rather than a plain Overlay canvas — so a
-        // CameraFeedSensor clone of it can capture display 2 for recording.
+        // A dedicated camera whose only job is to clear the display every
+        // frame — stops smearing, keeps this off the simulator's view.
         private void BuildDashboardCamera()
         {
             var camGO = new GameObject("Dashboard Camera", typeof(Camera));
@@ -139,30 +123,9 @@ namespace Delphi
             var cam = camGO.GetComponent<Camera>();
             cam.clearFlags      = CameraClearFlags.SolidColor;
             cam.backgroundColor = _bgColor;
-            cam.cullingMask     = 1 << UiLayer;
+            cam.cullingMask     = 0;
             cam.targetDisplay   = dashboardDisplay;
             cam.depth           = 100;
-            DisplayCamera = cam;
-        }
-
-        // If nothing is plugged into DelphiManager's DashboardDisplay slot,
-        // create a CameraFeedSensor mirroring DisplayCamera so display 2
-        // (this dashboard + SessionControlsUI's transport bar) gets recorded
-        // just like any other feed.
-        private void AutoWireDisplayCapture()
-        {
-            var sensorGO = new GameObject("[feed] Dashboard Display Capture", typeof(CameraFeedSensor));
-            sensorGO.transform.SetParent(transform, false);
-            var sensor = sensorGO.GetComponent<CameraFeedSensor>();
-            sensor.sourceCamera = DisplayCamera;
-            manager.AutoWireFrameSlot(FrameChannel.DashboardDisplay, sensor);
-        }
-
-        private static void SetLayerRecursively(Transform t, int layer)
-        {
-            t.gameObject.layer = layer;
-            for (int i = 0; i < t.childCount; i++)
-                SetLayerRecursively(t.GetChild(i), layer);
         }
 
         private void BuildUI()
@@ -171,9 +134,8 @@ namespace Delphi
                 typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
             canvasGO.transform.SetParent(transform, false);
             var canvas = canvasGO.GetComponent<Canvas>();
-            canvas.renderMode    = RenderMode.ScreenSpaceCamera;
-            canvas.worldCamera   = DisplayCamera;
-            canvas.planeDistance = 1f;
+            canvas.renderMode    = RenderMode.ScreenSpaceOverlay;
+            canvas.targetDisplay = dashboardDisplay;
             var scaler = canvasGO.GetComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920, 1080);
@@ -305,16 +267,34 @@ namespace Delphi
 
                 _panels.Add(panel);
             }
-
-            SetLayerRecursively(canvasGO.transform, UiLayer);
         }
 
         private void Update()
         {
+            string sig = manager.IsInPlayback ? manager.Playback.LoadedPath : null;
+            if (sig != _lastPlaybackSignature)
+            {
+                _lastPlaybackSignature = sig;
+                ResetWaveforms();
+            }
+
             _timer += Time.deltaTime;
-            if (_timer < updateInterval) return;
+            if (_timer < redrawInterval) return;
             _timer = 0f;
             RefreshAll();
+        }
+
+        // Called whenever playback is loaded, ejected, or switched to a
+        // different session — old graphs from a different source (live vs.
+        // a previous recording) would otherwise linger and mislead.
+        private void ResetWaveforms()
+        {
+            foreach (var p in _panels)
+            {
+                if (p.isFrame) continue;
+                for (int x = 0; x < p.history.Length; x++) p.history[x] = float.NaN;
+                RedrawWaveform(p);
+            }
         }
 
         private void RefreshAll()
@@ -340,7 +320,7 @@ namespace Delphi
             if (hasData)
             {
                 p.valueText.text  = $"{value:F1} {unit}".TrimEnd();
-                p.valueText.color = (Color)_line;
+                p.valueText.color = (Color)CurrentLineColor;
             }
             else
             {
@@ -371,7 +351,7 @@ namespace Delphi
                     p.image.rectTransform.sizeDelta = new Vector2(cellWidth, cellWidth * aspect);
                 }
                 p.valueText.text  = manager.IsInPlayback ? "Playback" : "Live";
-                p.valueText.color = (Color)_line;
+                p.valueText.color = (Color)CurrentLineColor;
             }
             else
             {
@@ -409,6 +389,7 @@ namespace Delphi
                 float range = Mathf.Max(mx - mn, 1e-3f);
                 float pad = range * 0.15f;
                 mn -= pad; range += pad * 2f;
+                Color32 lineColor = CurrentLineColor;
 
                 int prevY = -1;
                 for (int x = 0; x < w; x++)
@@ -419,7 +400,7 @@ namespace Delphi
                     int yy = Mathf.Clamp(Mathf.RoundToInt(t * (h - 1)), 0, h - 1);
                     if (prevY < 0) prevY = yy;
                     int y0 = Mathf.Min(prevY, yy), y1 = Mathf.Max(prevY, yy);
-                    for (int k = y0; k <= y1; k++) p.buffer[k * w + x] = _line;
+                    for (int k = y0; k <= y1; k++) p.buffer[k * w + x] = lineColor;
                     prevY = yy;
                 }
             }

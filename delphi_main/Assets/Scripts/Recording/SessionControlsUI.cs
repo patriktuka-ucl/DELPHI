@@ -16,22 +16,19 @@ namespace Delphi
     ///           Play/Pause, frame-step −1/+1, speed cycle, time readout.
     ///   Row 3 — scrubber (drag anywhere in the session).
     ///
-    /// Keyboard (only while a session is loaded, except R):
-    ///   R = record toggle, Space = play/pause, ←/→ = step one frame,
-    ///   ↑/↓ = cycle playback speed.
+    /// Keyboard (only while a session is loaded):
+    ///   Space = play/pause, ←/→ = step one frame, ↑/↓ = cycle playback speed.
+    /// No recording hotkey — REC/STOP is button-only so typing a session
+    /// name (or anything else) can never trigger it by accident.
     /// </summary>
     public class SessionControlsUI : MonoBehaviour
     {
         [Header("Links (auto-found if left empty)")]
         public SessionRecorder recorder;
         public SessionPlayer player;
-        [Tooltip("Auto-found if left empty. Its display camera and UI layer " +
-                 "are reused here so this bar renders on the same display and " +
-                 "gets swept up by the DashboardDisplay capture feed together " +
-                 "with the dashboard.")]
-        public DashboardUI dashboard;
 
-        [Header("Display (used only if no DashboardUI is found)")]
+        [Header("Display")]
+        [Tooltip("Must match DashboardUI.dashboardDisplay.")]
         public int dashboardDisplay = 1;
 
         [Header("Position")]
@@ -59,6 +56,7 @@ namespace Delphi
         private Font _font;
         private Text _recButtonText, _recStatus;
         private Image _recButtonImage;
+        private InputField _nameField;
         private Text _sessionLabel, _playButtonText, _speedButtonText, _timeLabel;
         private Button _loadButton, _playButton, _stepBackButton, _stepFwdButton, _speedButton;
         private Text _loadButtonText;
@@ -72,9 +70,8 @@ namespace Delphi
 
         private void Start()
         {
-            if (recorder == null)  recorder  = FindFirstObjectByType<SessionRecorder>();
-            if (player == null)    player    = FindFirstObjectByType<SessionPlayer>();
-            if (dashboard == null) dashboard = FindFirstObjectByType<DashboardUI>();
+            if (recorder == null) recorder = FindFirstObjectByType<SessionRecorder>();
+            if (player == null)   player   = FindFirstObjectByType<SessionPlayer>();
             _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             BuildUI();
             RefreshSessions();
@@ -93,7 +90,7 @@ namespace Delphi
         {
             if (recorder == null) return;
             if (recorder.IsRecording) recorder.StopRecording();
-            else recorder.StartRecording();
+            else recorder.StartRecording(_nameField != null ? _nameField.text : null);
         }
 
         private void CycleSession(int dir)
@@ -138,6 +135,7 @@ namespace Delphi
                     ? $"RECORDING  {FormatTime(recorder.ElapsedSeconds)}"
                     : $"idle — {_sessions.Length} session(s) on disk";
                 _recStatus.color = rec ? _recRed : _dim;
+                if (_nameField != null) _nameField.interactable = !rec;
             }
 
             // Playback row.
@@ -180,8 +178,10 @@ namespace Delphi
         {
             var kb = Keyboard.current;
             if (kb == null) return;
-
-            if (kb.rKey.wasPressedThisFrame) ToggleRecord();
+            // Typing in the session-name field shouldn't fire transport
+            // shortcuts (space/arrows) — the Input System doesn't check UI
+            // focus on its own, so this has to be explicit.
+            if (_nameField != null && _nameField.isFocused) return;
 
             if (player == null || !player.IsLoaded) return;
             if (kb.spaceKey.wasPressedThisFrame)      player.TogglePlay();
@@ -201,19 +201,8 @@ namespace Delphi
                 typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
             canvasGO.transform.SetParent(transform, false);
             var canvas = canvasGO.GetComponent<Canvas>();
-            if (dashboard != null)
-            {
-                // Share the dashboard's own camera so this bar renders on the
-                // same display AND gets picked up by its display-capture feed.
-                canvas.renderMode    = RenderMode.ScreenSpaceCamera;
-                canvas.worldCamera   = dashboard.DisplayCamera;
-                canvas.planeDistance = 0.5f; // in front of the dashboard's own canvas (1f)
-            }
-            else
-            {
-                canvas.renderMode    = RenderMode.ScreenSpaceOverlay;
-                canvas.targetDisplay = dashboardDisplay;
-            }
+            canvas.renderMode    = RenderMode.ScreenSpaceOverlay;
+            canvas.targetDisplay = dashboardDisplay;
             canvas.sortingOrder  = 10; // above the dashboard canvas
             var scaler = canvasGO.GetComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -234,8 +223,10 @@ namespace Delphi
             // Row 1 — recording.
             (_, _recButtonImage, _recButtonText) =
                 CreateButton(panel.transform, "REC", new Vector2(14, -12), new Vector2(90, 34), ToggleRecord);
+            _nameField = CreateInputField(panel.transform, new Vector2(118, -12), new Vector2(280, 34),
+                "Session name (optional)");
             _recStatus = CreateText(panel.transform, "idle", 16, TextAnchor.MiddleLeft, _dim,
-                new Vector2(118, -12), new Vector2(900, 34));
+                new Vector2(412, -12), new Vector2(606, 34));
 
             // Row 2 — session browser + transport.
             float y = -56;
@@ -272,15 +263,6 @@ namespace Delphi
                     _scrubbing = false;
                 }
             });
-
-            if (dashboard != null) SetLayerRecursively(canvasGO.transform, dashboard.UiLayer);
-        }
-
-        private static void SetLayerRecursively(Transform t, int layer)
-        {
-            t.gameObject.layer = layer;
-            for (int i = 0; i < t.childCount; i++)
-                SetLayerRecursively(t.GetChild(i), layer);
         }
 
         private (Button, Image, Text) CreateButton(Transform parent, string label,
@@ -306,6 +288,38 @@ namespace Delphi
             trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one;
             trt.offsetMin = trt.offsetMax = Vector2.zero;
             return (btn, img, text);
+        }
+
+        private InputField CreateInputField(Transform parent, Vector2 pos, Vector2 size, string placeholder)
+        {
+            var go = new GameObject("Session Name Field", typeof(Image), typeof(InputField));
+            go.transform.SetParent(parent, false);
+            var img = go.GetComponent<Image>();
+            img.color = _buttonColor;
+            var rt = go.GetComponent<RectTransform>();
+            rt.anchorMin = rt.anchorMax = new Vector2(0, 1);
+            rt.pivot = new Vector2(0, 1);
+            rt.anchoredPosition = pos;
+            rt.sizeDelta = size;
+
+            var text = CreateText(go.transform, "", 15, TextAnchor.MiddleLeft,
+                new Color(0.9f, 0.92f, 0.97f), Vector2.zero, Vector2.zero);
+            var trt = text.rectTransform;
+            trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one;
+            trt.offsetMin = new Vector2(8, 2); trt.offsetMax = new Vector2(-8, -2);
+
+            var placeholderText = CreateText(go.transform, placeholder, 15, TextAnchor.MiddleLeft,
+                _dim, Vector2.zero, Vector2.zero);
+            placeholderText.fontStyle = FontStyle.Italic;
+            var prt2 = placeholderText.rectTransform;
+            prt2.anchorMin = Vector2.zero; prt2.anchorMax = Vector2.one;
+            prt2.offsetMin = new Vector2(8, 2); prt2.offsetMax = new Vector2(-8, -2);
+
+            var field = go.GetComponent<InputField>();
+            field.textComponent = text;
+            field.placeholder = placeholderText;
+            field.targetGraphic = img;
+            return field;
         }
 
         private Slider CreateSlider(Transform parent, Vector2 pos, Vector2 size)

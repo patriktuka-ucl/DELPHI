@@ -25,8 +25,12 @@ namespace Delphi
 
         public override float ReadValue()
         {
+            // Runs on DELPHI's sampling thread: plain reference null-check
+            // (`is null`), because Unity's overloaded == belongs to the main
+            // thread. The connection's getters are lock-protected, so
+            // reading them here is safe.
             var conn = EmotibitOscConnection.Instance;
-            if (conn == null)
+            if (conn is null)
             {
                 Current = float.NaN;
                 return Current;

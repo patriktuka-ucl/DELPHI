@@ -28,8 +28,7 @@ namespace Delphi
     {
         Webcam,           // participant-facing physical camera (WebcamSensor)
         SceneOverview,    // bird's-eye scene camera (CameraFeedSensor)
-        PlayerView,       // what the participant sees (CameraFeedSensor)
-        DashboardDisplay  // display 2 itself — dashboard + controls (CameraFeedSensor, auto-wired by DashboardUI)
+        PlayerView        // what the participant sees (CameraFeedSensor)
     }
 
     /// <summary>
@@ -47,9 +46,16 @@ namespace Delphi
     /// data. The manager only polls whatever is plugged in; it doesn't
     /// generate anything itself.
     /// </summary>
+    // Runs before every default-order (0) script — dashboard, recorder,
+    // CarDriver, etc. — so whatever they read this frame was sampled this
+    // frame, not left over from last frame's Update ordering.
+    [DefaultExecutionOrder(-1000)]
     public class DelphiManager : MonoBehaviour
     {
         [Header("Gold-standard inputs")]
+        [Tooltip("Sample rate for this group of scalar sensors, Hz.")]
+        [Range(1f, 240f)]
+        public float goldStandardRateHz = 60f;
         [SerializeField] private bool heartRateOn = true;
         [SerializeField] private ScalarSensor heartRate;
         [SerializeField] private bool hrvRmssdOn = true;
@@ -60,6 +66,9 @@ namespace Delphi
         [SerializeField] private ScalarSensor gsr;
 
         [Header("Good additions")]
+        [Tooltip("Sample rate for this group of scalar sensors, Hz.")]
+        [Range(1f, 240f)]
+        public float goodAdditionsRateHz = 60f;
         [SerializeField] private bool blinkRateOn = true;
         [SerializeField] private ScalarSensor blinkRate;
         [SerializeField] private bool gazeOn = true;
@@ -68,21 +77,49 @@ namespace Delphi
         [SerializeField] private ScalarSensor pupilDiameter;
 
         [Header("Experimental")]
+        [Tooltip("Sample rate for this group of scalar sensors, Hz.")]
+        [Range(1f, 240f)]
+        public float experimentalRateHz = 60f;
         [SerializeField] private bool eegOn = true;
         [SerializeField] private ScalarSensor eeg;
         [SerializeField] private bool facialOn = true;
         [SerializeField] private ScalarSensor facial;
 
         [Header("Video / frame inputs")]
+        [Tooltip("Per-feed capture FPS. ALL rates in DELPHI live here on the " +
+                 "manager — sensors have no clocks of their own, they capture " +
+                 "when commanded. Each feed gets its own FPS because their " +
+                 "costs differ (a camera feed is a full extra scene render).")]
         [SerializeField] private bool webcamOn = true;
         [FormerlySerializedAs("camera")]
         [SerializeField] private FrameSensor webcam;
+        [SerializeField] private float webcamFps = 30f;
         [SerializeField] private bool sceneOverviewOn = true;
         [SerializeField] private FrameSensor sceneOverview;
+        [SerializeField] private float sceneOverviewFps = 30f;
         [SerializeField] private bool playerViewOn = true;
         [SerializeField] private FrameSensor playerView;
-        [SerializeField] private bool dashboardDisplayOn = true;
-        [SerializeField] private FrameSensor dashboardDisplay;
+        [SerializeField] private float playerViewFps = 30f;
+
+        // The acquisition engine — all scalar sampling and csv recording
+        // happen on ITS dedicated thread with its own DelphiClock schedule,
+        // fully decoupled from Unity's frame loop. This MonoBehaviour is
+        // just the facade: configuration, frame feeds (main-thread-only
+        // Unity APIs) and the query API the UI/simulator call into.
+        private DelphiCore _core;
+        public DelphiCore Core => _core;
+
+        // Frame feed next-tick times (frame capture MUST stay on the main
+        // thread — camera/texture APIs). Scheduled on DelphiClock, same
+        // time base as the core.
+        private readonly double[] _frameNext = new double[3]; // indexed by FrameChannel
+
+        private static readonly Channel[] GoldStandardChannels =
+            { Channel.HeartRate, Channel.RMSSD, Channel.RespRate, Channel.GSR };
+        private static readonly Channel[] GoodAdditionsChannels =
+            { Channel.BlinkRate, Channel.Gaze, Channel.PupilDiameter };
+        private static readonly Channel[] ExperimentalChannels =
+            { Channel.EEG, Channel.Facial };
 
         // Canonical display order for the dashboard.
         public static readonly Channel[] AllChannels =
@@ -94,8 +131,7 @@ namespace Delphi
 
         public static readonly FrameChannel[] AllFrameChannels =
         {
-            FrameChannel.Webcam, FrameChannel.SceneOverview, FrameChannel.PlayerView,
-            FrameChannel.DashboardDisplay
+            FrameChannel.Webcam, FrameChannel.SceneOverview, FrameChannel.PlayerView
         };
 
         // ── Playback override ───────────────────────────────────────────
@@ -165,46 +201,78 @@ namespace Delphi
 
         public static (string label, string unit) FrameMeta(FrameChannel ch) => ch switch
         {
-            FrameChannel.Webcam           => ("Webcam", ""),
-            FrameChannel.SceneOverview    => ("Scene overview", ""),
-            FrameChannel.PlayerView       => ("Player view", ""),
-            FrameChannel.DashboardDisplay => ("Dashboard display", ""),
-            _                             => (ch.ToString(), "")
+            FrameChannel.Webcam        => ("Webcam", ""),
+            FrameChannel.SceneOverview => ("Scene overview", ""),
+            FrameChannel.PlayerView    => ("Player view", ""),
+            _                          => (ch.ToString(), "")
         };
 
-        // ── Frame slot auto-wiring ───────────────────────────────────────
-        // DashboardUI creates its display-capture camera at runtime, so it
-        // can't be dragged into the Inspector ahead of time — it wires
-        // itself in here, but only if nothing was already assigned by hand.
-        public void AutoWireFrameSlot(FrameChannel ch, FrameSensor sensor)
+        // ── Core lifecycle ──────────────────────────────────────────────
+        // Scalar sampling and csv recording live on DelphiCore's dedicated
+        // thread with its own DelphiClock schedule — Unity's frame loop
+        // cannot touch their cadence. Started here, torn down on disable.
+        private DelphiCore.Group[] _coreGroups;
+
+        private void OnEnable()
         {
-            if (FrameSlot(ch) != null) return;
-            switch (ch)
+            _coreGroups = new[]
             {
-                case FrameChannel.DashboardDisplay: dashboardDisplay = sensor; break;
-                case FrameChannel.Webcam:           webcam = sensor; break;
-                case FrameChannel.SceneOverview:    sceneOverview = sensor; break;
-                case FrameChannel.PlayerView:       playerView = sensor; break;
-            }
+                new DelphiCore.Group { channels = GoldStandardChannels,  rateHz = goldStandardRateHz },
+                new DelphiCore.Group { channels = GoodAdditionsChannels, rateHz = goodAdditionsRateHz },
+                new DelphiCore.Group { channels = ExperimentalChannels,  rateHz = experimentalRateHz },
+            };
+            _core = new DelphiCore(_coreGroups, AllChannels, Slot, IsOn);
+            _core.Start();
         }
 
-        // ── Sampling ───────────────────────────────────────────────────
+        private void OnDisable()
+        {
+            _core?.Stop();
+            _core = null;
+        }
+
+        // ── Main-thread duties only ─────────────────────────────────────
+        // 1. Frame feeds — camera/texture APIs are main-thread-only, so
+        //    their capture ticks (still on the DelphiClock time base, at
+        //    the per-feed FPS above) have to run here.
+        // 2. Forward live Inspector rate tweaks to the core's groups.
+        // Everything scalar happens on the core's thread.
         private void Update()
         {
-            foreach (var ch in AllChannels)
+            for (int i = 0; i < AllFrameChannels.Length; i++)
             {
-                if (!IsOn(ch)) continue;
-                var s = Slot(ch);
-                if (s != null) s.ReadValue();
-            }
-
-            foreach (var fc in AllFrameChannels)
-            {
+                var fc = AllFrameChannels[i];
                 if (!IsOn(fc)) continue;
                 var s = FrameSlot(fc);
-                if (s != null) s.ReadFrame();
+                if (s == null) continue;
+                if (DelphiClock.Now < _frameNext[i]) continue;
+                _frameNext[i] = DelphiClock.Now + 1.0 / FrameRate(fc);
+                s.ReadFrame();
+            }
+
+            if (_coreGroups != null)
+            {
+                _coreGroups[0].rateHz = goldStandardRateHz;
+                _coreGroups[1].rateHz = goodAdditionsRateHz;
+                _coreGroups[2].rateHz = experimentalRateHz;
             }
         }
+
+        /// <summary>Fastest configured scalar rate — the csv row rate.</summary>
+        public float MaxScalarRateHz =>
+            Mathf.Max(1f, Mathf.Max(goldStandardRateHz,
+                      Mathf.Max(goodAdditionsRateHz, experimentalRateHz)));
+
+        /// <summary>The commanded capture rate for a frame feed — the ONLY
+        /// place video rates are configured. The recorder encodes each mp4
+        /// at this rate too.</summary>
+        public float FrameRate(FrameChannel ch) => Mathf.Max(0.1f, ch switch
+        {
+            FrameChannel.Webcam        => webcamFps,
+            FrameChannel.SceneOverview => sceneOverviewFps,
+            FrameChannel.PlayerView    => playerViewFps,
+            _                          => 30f
+        });
 
         // Map a channel to its serialized slot.
         private ScalarSensor Slot(Channel ch) => ch switch
@@ -237,20 +305,18 @@ namespace Delphi
 
         private FrameSensor FrameSlot(FrameChannel ch) => ch switch
         {
-            FrameChannel.Webcam           => webcam,
-            FrameChannel.SceneOverview    => sceneOverview,
-            FrameChannel.PlayerView       => playerView,
-            FrameChannel.DashboardDisplay => dashboardDisplay,
-            _                             => null
+            FrameChannel.Webcam        => webcam,
+            FrameChannel.SceneOverview => sceneOverview,
+            FrameChannel.PlayerView    => playerView,
+            _                          => null
         };
 
         private bool IsOn(FrameChannel ch) => ch switch
         {
-            FrameChannel.Webcam           => webcamOn,
-            FrameChannel.SceneOverview    => sceneOverviewOn,
-            FrameChannel.PlayerView       => playerViewOn,
-            FrameChannel.DashboardDisplay => dashboardDisplayOn,
-            _                             => true
+            FrameChannel.Webcam        => webcamOn,
+            FrameChannel.SceneOverview => sceneOverviewOn,
+            FrameChannel.PlayerView    => playerViewOn,
+            _                          => true
         };
     }
 }

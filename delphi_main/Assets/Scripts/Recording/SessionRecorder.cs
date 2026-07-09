@@ -10,9 +10,13 @@ namespace Delphi
 {
     /// <summary>
     /// Records a session to disk: one mp4 per connected frame channel plus a
-    /// sensors.csv where row N is sampled at the SAME clock tick as video
-    /// frame N of every feed — that shared tick (at `fps`) is the sync
-    /// contract playback relies on. A meta.json manifest ties it together.
+    /// sensors.csv. The csv is written by DelphiCore ON ITS OWN SAMPLING
+    /// THREAD, with DelphiClock timestamps — this component merely tells the
+    /// core when to start/stop and where. Video capture stays here on the
+    /// main thread (camera/texture APIs are main-thread-only Unity), but
+    /// ticks on the same DelphiClock time base with per-feed clocks, so csv
+    /// and mp4 times share one zero. Playback syncs by time, not row index.
+    /// A meta.json manifest ties it together.
     ///
     /// Session folder: {persistentDataPath}/Sessions/yyyyMMdd_HHmmss/
     ///
@@ -21,9 +25,14 @@ namespace Delphi
     /// FfmpegVideoWriter's background thread → mp4. Nothing blocks the main
     /// thread except the final drain in StopRecording.
     ///
-    /// If the sim ever runs slower than `fps`, the latest frame is written
-    /// multiple times (and the csv row duplicated) so wall-clock sync is
-    /// preserved instead of the video silently shortening.
+    /// If the sim ever runs slower than a feed's rate, the latest frame is
+    /// written multiple times so wall-clock sync is preserved instead of
+    /// the video silently shortening.
+    ///
+    /// This has NO rate fields of its own: DelphiManager is the single
+    /// owner of every rate in DELPHI. Each feed's mp4 is captured and
+    /// encoded at DelphiManager.FrameRate(channel), snapshotted at record
+    /// start.
     /// </summary>
     public class SessionRecorder : MonoBehaviour
     {
@@ -34,9 +43,8 @@ namespace Delphi
         public CarDriver egoCar;
 
         [Header("Capture")]
-        [Tooltip("Video frames AND sensor-log rows per second.")]
-        public int fps = 30;
-        [Tooltip("Feeds wider than this are scaled down (aspect kept).")]
+        [Tooltip("Feeds wider than this are scaled down (aspect kept). All " +
+                 "capture RATES are configured on DelphiManager, not here.")]
         public int maxFeedWidth = 1280;
 
         [Header("Output")]
@@ -50,7 +58,7 @@ namespace Delphi
         public bool flipVideoVertically = true;
 
         public bool IsRecording { get; private set; }
-        public float ElapsedSeconds => IsRecording ? Time.time - _startTime : 0f;
+        public float ElapsedSeconds => IsRecording ? (float)(DelphiClock.Now - _clockStart) : 0f;
         public string LastSessionPath { get; private set; }
 
         public static string DefaultSessionsRoot =>
@@ -66,16 +74,16 @@ namespace Delphi
             public FfmpegVideoWriter writer;
             public readonly Queue<(AsyncGPUReadbackRequest req, int repeats)> pending = new();
             public int width, height;
+            public int fps;            // DelphiManager.FrameRate at record start
+            public double nextTick;    // this feed's own capture clock (session-relative, DelphiClock base)
             public Texture2D syncReadbackTex; // only on hardware without async readback
         }
 
         private readonly List<Feed> _feeds = new();
-        private StreamWriter _csv;
         private string _sessionPath;
-        private float _startTime;
-        private float _nextTickTime;
-        private int _ticksWritten;
+        private double _clockStart;    // DelphiClock.Now at REC — shared zero for csv AND video
         private bool _readbackSupported;
+        private float _csvRate;        // nominal (MaxScalarRateHz at start) — recorded in meta.json
 
         private static readonly string[] FfmpegCandidates =
         {
@@ -90,7 +98,11 @@ namespace Delphi
         }
 
         // ── Control ─────────────────────────────────────────────────────
-        public bool StartRecording()
+        /// <summary>Starts a new session. `sessionName`, if given, becomes the
+        /// session's folder name (sanitized; a timestamp is appended instead
+        /// of clobbering if that name is already taken) — leave it null/empty
+        /// for the old auto-timestamp behaviour.</summary>
+        public bool StartRecording(string sessionName = null)
         {
             if (IsRecording) return false;
             if (manager == null)
@@ -104,6 +116,11 @@ namespace Delphi
                                  "is loaded for playback — eject it first.");
                 return false;
             }
+            if (manager.Core == null)
+            {
+                Debug.LogError("[SessionRecorder] DelphiManager's core isn't running.");
+                return false;
+            }
 
             string ffmpeg = ResolveFfmpeg();
             if (ffmpeg == null)
@@ -113,8 +130,13 @@ namespace Delphi
                 return false;
             }
 
-            _sessionPath = Path.Combine(SessionsRoot,
-                DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture));
+            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
+            string folderName = string.IsNullOrWhiteSpace(sessionName)
+                ? timestamp
+                : SanitizeFolderName(sessionName);
+            _sessionPath = Path.Combine(SessionsRoot, folderName);
+            if (Directory.Exists(_sessionPath))
+                _sessionPath = Path.Combine(SessionsRoot, $"{folderName}_{timestamp}");
             Directory.CreateDirectory(_sessionPath);
 
             // One feed per frame channel that is actually delivering pixels.
@@ -129,34 +151,37 @@ namespace Delphi
                 int h = Mathf.RoundToInt((float)w * tex.height / tex.width);
                 w &= ~1; h &= ~1; // libx264 yuv420p needs even dimensions
 
+                int feedFps = Mathf.Max(1, Mathf.RoundToInt(manager.FrameRate(ch)));
                 var feed = new Feed
                 {
                     channel = ch,
                     width = w,
                     height = h,
+                    fps = feedFps,
+                    nextTick = 0f,
                     rt = new RenderTexture(w, h, 0, RenderTextureFormat.ARGB32),
                     writer = new FfmpegVideoWriter(ffmpeg,
                         Path.Combine(_sessionPath, ch + ".mp4"),
-                        w, h, fps, flipVideoVertically)
+                        w, h, feedFps, flipVideoVertically)
                 };
                 feed.rt.Create();
                 _feeds.Add(feed);
             }
 
-            // Sensor log — header defines the column order meta.json records.
-            _csv = new StreamWriter(Path.Combine(_sessionPath, "sensors.csv"));
-            var header = new List<string> { "time_s" };
-            foreach (var ch in DelphiManager.AllChannels) header.Add(ch.ToString());
-            header.Add("ego_s_m");
-            header.Add("ego_speed_kmh");
-            _csv.WriteLine(string.Join(",", header));
+            // Shared session zero for BOTH the core's csv thread and the
+            // video clocks below — one time base, one origin.
+            _clockStart = DelphiClock.Now;
+            _csvRate = manager.MaxScalarRateHz;
 
-            _startTime = Time.time;
-            _nextTickTime = 0f;
-            _ticksWritten = 0;
+            // The csv is written by DelphiCore on its sampling thread.
+            manager.Core.EgoS = float.NaN;
+            manager.Core.EgoSpeedKmh = float.NaN;
+            manager.Core.StartCsv(Path.Combine(_sessionPath, "sensors.csv"), _clockStart);
+
             IsRecording = true;
-            Debug.Log($"[SessionRecorder] Recording {_feeds.Count} video feed(s) + " +
-                      $"sensor log at {fps} fps → {_sessionPath}");
+            Debug.Log($"[SessionRecorder] Recording {_feeds.Count} video feed(s) (rates from " +
+                      $"DelphiManager) + sensor log at {_csvRate:0.#} Hz on the core's thread " +
+                      $"→ {_sessionPath}");
             return true;
         }
 
@@ -164,7 +189,10 @@ namespace Delphi
         {
             if (!IsRecording) return;
             IsRecording = false;
-            float duration = Time.time - _startTime;
+            float duration = (float)(DelphiClock.Now - _clockStart);
+
+            // Stop the core's csv thread writing first.
+            if (manager != null && manager.Core != null) manager.Core.StopCsv();
 
             foreach (var feed in _feeds)
             {
@@ -181,14 +209,16 @@ namespace Delphi
                 if (feed.syncReadbackTex != null) Destroy(feed.syncReadbackTex);
             }
 
-            _csv.Flush();
-            _csv.Close();
-            _csv = null;
+            // Top-level fps = fastest feed (playback's frame-step size);
+            // each feed also records its own rate.
+            int maxFeedFps = Mathf.Max(1, Mathf.RoundToInt(_csvRate));
+            foreach (var f in _feeds) maxFeedFps = Mathf.Max(maxFeedFps, f.fps);
 
             var meta = new SessionMeta
             {
                 started = DateTime.Now.AddSeconds(-duration).ToString("o"),
-                fps = fps,
+                fps = maxFeedFps,
+                csvRateHz = _csvRate,
                 duration = duration,
                 scalarChannels = Array.ConvertAll(DelphiManager.AllChannels, c => c.ToString()),
                 feeds = _feeds.ConvertAll(f => new SessionFeedMeta
@@ -196,7 +226,8 @@ namespace Delphi
                     channel = f.channel.ToString(),
                     file = f.channel + ".mp4",
                     width = f.width,
-                    height = f.height
+                    height = f.height,
+                    fps = f.fps
                 }).ToArray()
             };
             File.WriteAllText(Path.Combine(_sessionPath, "meta.json"),
@@ -210,32 +241,37 @@ namespace Delphi
         private void OnDestroy() => StopRecording();
         private void OnApplicationQuit() => StopRecording();
 
-        // ── Capture loop ────────────────────────────────────────────────
-        // LateUpdate so DelphiManager.Update has already polled every sensor
-        // (and CameraFeedSensor has rendered) this frame.
+        // ── Capture loop (video only — csv lives on the core's thread) ──
+        // LateUpdate so DelphiManager.Update has already ticked the frame
+        // feeds this frame. Also publishes ego telemetry into the core's
+        // latch here, since transforms can only be read on the main thread.
         private void LateUpdate()
         {
             if (!IsRecording) return;
 
+            if (egoCar != null && manager.Core != null)
+            {
+                manager.Core.EgoS = egoCar.S;
+                manager.Core.EgoSpeedKmh = egoCar.CurrentSpeedKmh;
+            }
+
             foreach (var feed in _feeds) ProcessReadbacks(feed, blocking: false);
 
-            float t = Time.time - _startTime;
-            int due = 0;
-            while (_nextTickTime <= t)
-            {
-                due++;
-                _nextTickTime += 1f / fps;
-            }
-            if (due == 0) return;
+            double t = DelphiClock.Now - _clockStart;
 
-            // CSV: one row per tick (rows stay 1:1 with video frames).
-            for (int i = 0; i < due; i++)
-                WriteCsvRow((_ticksWritten + i) / (float)fps);
-            _ticksWritten += due;
-
-            // Video: capture once, repeat `due` times if we're behind.
+            // Per-feed video clocks — each feed captures at its own
+            // DelphiManager rate. Capture once per frame, repeat `due` times
+            // if the sim ran slower than the feed's rate.
             foreach (var feed in _feeds)
             {
+                int due = 0;
+                while (feed.nextTick <= t)
+                {
+                    due++;
+                    feed.nextTick += 1.0 / feed.fps;
+                }
+                if (due == 0) continue;
+
                 var src = manager.GetFrame(feed.channel);
                 if (src != null) Graphics.Blit(src, feed.rt);
                 else Graphics.Blit(Texture2D.blackTexture, feed.rt);
@@ -286,21 +322,12 @@ namespace Delphi
             for (int i = 0; i < repeats; i++) feed.writer.Push(bytes);
         }
 
-        private void WriteCsvRow(float t)
+        private static string SanitizeFolderName(string name)
         {
-            var cells = new List<string>(DelphiManager.AllChannels.Length + 3)
-            {
-                t.ToString("F4", CultureInfo.InvariantCulture)
-            };
-            foreach (var ch in DelphiManager.AllChannels)
-            {
-                float v = manager.GetValue(ch);
-                cells.Add(float.IsNaN(v) ? "NaN"
-                                         : v.ToString("F4", CultureInfo.InvariantCulture));
-            }
-            cells.Add(egoCar != null ? egoCar.S.ToString("F2", CultureInfo.InvariantCulture) : "NaN");
-            cells.Add(egoCar != null ? egoCar.CurrentSpeedKmh.ToString("F2", CultureInfo.InvariantCulture) : "NaN");
-            _csv.WriteLine(string.Join(",", cells));
+            name = name.Trim();
+            foreach (char c in Path.GetInvalidFileNameChars())
+                name = name.Replace(c, '_');
+            return name;
         }
 
         private string ResolveFfmpeg()

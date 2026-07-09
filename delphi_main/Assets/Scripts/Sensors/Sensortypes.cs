@@ -20,12 +20,21 @@ namespace Delphi
 
     public abstract class ScalarSensor : BaseSensor
     {
-        /// <summary>Most recent sampled value. float.NaN when unavailable.</summary>
+        /// <summary>Most recent sampled value. float.NaN when unavailable.
+        /// Written by the sampling thread, read from anywhere (float reads
+        /// are atomic).</summary>
         public abstract float Current { get; protected set; }
 
         /// <summary>
-        /// Sample the sensor and return the new value. Called once per frame
-        /// by DelphiManager.Update(). Must never block the main thread.
+        /// Sample the sensor and return the new value.
+        ///
+        /// THREADING CONTRACT: called from DelphiCore's dedicated sampling
+        /// thread, NOT the Unity main thread. Implementations must be
+        /// thread-safe, must never block, and must not touch Unity APIs
+        /// that are main-thread-only (Time, Random, transforms, GameObjects
+        /// …). Use DelphiClock.Now for time and System.Random for noise.
+        /// IO-backed sensors should acquire on their own thread and just
+        /// hand over the latest latched value here (see GSRSensorSerial).
         /// </summary>
         public abstract float ReadValue();
     }
@@ -36,8 +45,10 @@ namespace Delphi
         public abstract Texture CurrentFrame { get; }
 
         /// <summary>
-        /// Capture/refresh the latest frame and return it. Called once per
-        /// frame by DelphiManager.Update(). Must never block the main thread.
+        /// Capture/refresh the latest frame and return it. Called by
+        /// DelphiManager on the MAIN thread (unlike scalar sensors — camera
+        /// and texture APIs are main-thread-only in Unity), paced by the
+        /// manager's per-feed FPS settings. Must never block.
         /// </summary>
         public abstract Texture ReadFrame();
     }
