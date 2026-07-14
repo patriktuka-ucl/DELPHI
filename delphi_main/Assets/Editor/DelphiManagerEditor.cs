@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
@@ -70,12 +71,13 @@ namespace Delphi.EditorTools
             { "playerView", FrameChannel.PlayerView },
         };
 
-        private static readonly Color OnChip     = new Color(0.30f, 0.55f, 0.35f);
+        private static readonly Color OnChip     = new Color(0.20f, 0.85f, 0.35f);
         private static readonly Color OffChip    = new Color(0.35f, 0.35f, 0.38f);
         private static readonly Color DotLive        = new Color(0.35f, 0.85f, 0.50f);
         private static readonly Color DotNoSignal     = new Color(0.85f, 0.30f, 0.30f);
         private static readonly Color DotDisabled     = new Color(0.85f, 0.75f, 0.25f);
         private static readonly Color DotNotAttached  = new Color(0.55f, 0.55f, 0.58f);
+        private static readonly Color StrikeThrough   = Color.white;
 
         // Repaint every frame in Play mode so status dots track live data.
         public override bool RequiresConstantRepaint() => Application.isPlaying;
@@ -87,35 +89,30 @@ namespace Delphi.EditorTools
 
             EditorGUILayout.Space(2);
             DrawLegend();
-            EditorGUILayout.Space(6);
+            EditorGUILayout.Space(10);
 
             foreach (var (header, rateProp, rows) in ScalarGroups)
             {
                 DrawGroupHeader(header, rateProp);
                 EditorGUILayout.BeginVertical("box");
                 foreach (var row in rows)
+                    // Lazy lookup, not a pre-computed value: evaluated INSIDE
+                    // DrawRow, after that row's own click (if any) has already
+                    // been pushed to the live target — see DrawRow's comment.
                     DrawRow(row.label, row.onProp, row.sensorProp,
-                            mgr.GetStatus(ChannelByProp[row.sensorProp]));
+                            () => mgr.GetStatus(ChannelByProp[row.sensorProp]));
                 EditorGUILayout.EndVertical();
-                EditorGUILayout.Space(4);
+                EditorGUILayout.Space(14);
             }
 
             EditorGUILayout.LabelField("Video / frame inputs", EditorStyles.boldLabel);
             EditorGUILayout.BeginVertical("box");
             foreach (var row in FrameRows)
                 DrawRow(row.label, row.onProp, row.sensorProp,
-                        mgr.GetStatus(FrameChannelByProp[row.sensorProp]), row.rateProp);
+                        () => mgr.GetStatus(FrameChannelByProp[row.sensorProp]), row.rateProp);
             EditorGUILayout.EndVertical();
 
             serializedObject.ApplyModifiedProperties();
-            // An ON/OFF chip click sets onProp.boolValue directly rather than
-            // through a control that reliably flags GUI.changed, and the status
-            // dot's colour is computed BEFORE ApplyModifiedProperties commits
-            // that click — so without forcing a repaint the dot shows the
-            // PRE-click state until something else (mouse move, refocus) happens
-            // to redraw. Most visible outside Play mode, where
-            // RequiresConstantRepaint is off.
-            if (GUI.changed) Repaint();
         }
 
         // Header line for a scalar group, with that group's shared Hz field
@@ -187,7 +184,7 @@ namespace Delphi.EditorTools
         }
 
         private void DrawRow(string label, string onPropName, string sensorPropName,
-                             ChannelStatus status, string ratePropName = null)
+                             Func<ChannelStatus> getStatus, string ratePropName = null)
         {
             var onProp     = serializedObject.FindProperty(onPropName);
             var sensorProp = serializedObject.FindProperty(sensorPropName);
@@ -198,10 +195,36 @@ namespace Delphi.EditorTools
             Color prevBg = GUI.backgroundColor;
             GUI.backgroundColor = on ? OnChip : OffChip;
             if (GUILayout.Button(on ? "ON" : "OFF", GUILayout.Width(38), GUILayout.Height(18)))
+            {
                 onProp.boolValue = !on;
+                on = !on;
+                // Push straight to the live DelphiManager NOW rather than
+                // waiting for OnInspectorGUI's single ApplyModifiedProperties
+                // at the very end — getStatus() below reads mgr.GetStatus(...),
+                // which resolves off the ACTUAL field, not the SerializedObject
+                // buffer. Without this, the dot would show last redraw's status
+                // for one more pass even though the label/strike-through above
+                // (driven by the local `on`, already flipped) look instantly
+                // correct — a mismatch that's exactly what looked like "the dot
+                // doesn't update" even after the button/label started working.
+                serializedObject.ApplyModifiedProperties();
+            }
             GUI.backgroundColor = prevBg;
 
-            GUILayout.Label(label, GUILayout.Width(120));
+            const float labelWidth = 120f;
+            Rect labelRect = GUILayoutUtility.GetRect(labelWidth, EditorGUIUtility.singleLineHeight,
+                                                       GUILayout.Width(labelWidth));
+            EditorGUI.LabelField(labelRect, label);
+            if (!on)
+            {
+                // No strikethrough FontStyle in IMGUI — draw the line by hand,
+                // sized to the label's actual rendered width so it doesn't
+                // trail off into the empty rest of the 120px column.
+                float textWidth = Mathf.Min(labelWidth, GUI.skin.label.CalcSize(new GUIContent(label)).x);
+                var strikeRect = new Rect(labelRect.x, labelRect.y + labelRect.height / 2f, textWidth, 1f);
+                EditorGUI.DrawRect(strikeRect, StrikeThrough);
+            }
+
             EditorGUILayout.PropertyField(sensorProp, GUIContent.none, GUILayout.MinWidth(80));
 
             // Frame feeds: per-feed FPS, a field on the MANAGER itself —
@@ -217,7 +240,7 @@ namespace Delphi.EditorTools
 
             var dotRect = GUILayoutUtility.GetRect(14, 18, GUILayout.Width(14));
             dotRect.y += 4; dotRect.width = dotRect.height = 10;
-            EditorGUI.DrawRect(dotRect, status switch
+            EditorGUI.DrawRect(dotRect, getStatus() switch
             {
                 ChannelStatus.Live     => DotLive,
                 ChannelStatus.NoSignal => DotNoSignal,
