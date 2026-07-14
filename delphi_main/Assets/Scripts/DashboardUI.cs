@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
 using UnityEngine.UI;
+using Delphi.Trial;
 
 namespace Delphi
 {
@@ -26,6 +27,11 @@ namespace Delphi
     {
         [Header("Link (auto-found if left empty)")]
         public DelphiManager manager;
+        [Tooltip("Optional — auto-found. When present and a trial has captured " +
+                 "a baseline, each scalar graph draws the channel's baseline ± " +
+                 "k·SD guideline band and flags values that leave it (CLIP), so " +
+                 "you can see the raw signal AND where the −1..1 mapping saturates.")]
+        public TrialManager trial;
 
         [Header("Display")]
         [Tooltip("0 = Display 1, 1 = Display 2. Keep the simulator on Display 1.")]
@@ -67,6 +73,11 @@ namespace Delphi
         private readonly Color _notAttached = new Color(0.45f, 0.45f, 0.45f); // gray  — no sensor plugged in
         private readonly Color _noSignal    = new Color(0.85f, 0.25f, 0.25f); // red   — plugged in, nothing coming through
         private readonly Color _disabled    = new Color(0.85f, 0.75f, 0.25f); // yellow — plugged in but toggled off
+        // Trial normalization bounds overlay (baseline ± k·SD).
+        private readonly Color32 _boundBand = new Color32(34, 52, 70, 255);  // faint fill of the in-bounds zone
+        private readonly Color32 _boundEdge = new Color32(90, 130, 170, 255); // the ±1 bound lines
+        private readonly Color32 _clipLine  = new Color32(240, 150, 60, 255); // orange — waveform outside the band
+        private readonly Color   _clipText  = new Color(0.96f, 0.62f, 0.25f);
 
         // One of these per cell — scalar cells use tex/buffer/history for a
         // waveform; frame cells just point the RawImage at the sensor's
@@ -84,6 +95,11 @@ namespace Delphi
             public Texture2D  tex;
             public Color32[]  buffer;
             public float[]    history;
+
+            // Trial bounds for this channel, refreshed each redraw. hasBounds
+            // is false until a trial captures the baseline (or in playback).
+            public bool  hasBounds;
+            public float lower, upper;
         }
 
         private readonly List<Panel> _panels = new();
@@ -108,6 +124,7 @@ namespace Delphi
                 enabled = false;
                 return;
             }
+            if (trial == null) trial = FindFirstObjectByType<TrialManager>();
 
             _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
 
@@ -317,6 +334,12 @@ namespace Delphi
             bool hasData = manager.HasData(p.channel);
             float value  = manager.GetValue(p.channel);
 
+            // Trial normalization bounds — live only, and only once a baseline
+            // exists for this channel (TryGetBounds is false otherwise).
+            p.hasBounds = !manager.IsInPlayback && trial != null &&
+                          trial.TryGetBounds(p.channel, out p.lower, out p.upper);
+            bool clipped = p.hasBounds && hasData && (value < p.lower || value > p.upper);
+
             if (manager.IsInPlayback)
             {
                 // A real historical window ending at the current playback
@@ -338,8 +361,8 @@ namespace Delphi
             var (_, unit) = DelphiManager.Meta(p.channel);
             if (hasData)
             {
-                p.valueText.text  = $"{value:F1} {unit}".TrimEnd();
-                p.valueText.color = (Color)CurrentLineColor;
+                p.valueText.text  = $"{value:F1} {unit}{(clipped ? "  CLIP" : "")}".TrimEnd();
+                p.valueText.color = clipped ? _clipText : (Color)CurrentLineColor;
             }
             else
             {
@@ -387,39 +410,75 @@ namespace Delphi
         private void RedrawWaveform(Panel p)
         {
             int w = cellWidth, h = cellHeight;
-
             for (int i = 0; i < p.buffer.Length; i++) p.buffer[i] = _bg;
-            int midY = h / 2;
-            for (int x = 0; x < w; x++) p.buffer[midY * w + x] = _grid;
 
+            // Data extent.
             float mn = float.MaxValue, mx = float.MinValue;
-            bool any = false;
+            bool dataAny = false;
             for (int x = 0; x < w; x++)
             {
                 float v = p.history[x];
                 if (float.IsNaN(v)) continue;
-                any = true;
+                dataAny = true;
                 if (v < mn) mn = v;
                 if (v > mx) mx = v;
             }
 
-            if (any)
+            // Fold the trial bounds into the visible range so the guideline band
+            // is always on-screen and a value leaving it is visibly off the band,
+            // not just silently rescaled away.
+            if (p.hasBounds)
             {
-                float range = Mathf.Max(mx - mn, 1e-3f);
-                float pad = range * 0.15f;
-                mn -= pad; range += pad * 2f;
-                Color32 lineColor = CurrentLineColor;
+                if (!dataAny) { mn = p.lower; mx = p.upper; }
+                else { if (p.lower < mn) mn = p.lower; if (p.upper > mx) mx = p.upper; }
+            }
 
+            if (!dataAny && !p.hasBounds)
+            {
+                int mid0 = h / 2;
+                for (int x = 0; x < w; x++) p.buffer[mid0 * w + x] = _grid;
+                p.tex.SetPixels32(p.buffer);
+                p.tex.Apply(false);
+                return;
+            }
+
+            float range = Mathf.Max(mx - mn, 1e-3f);
+            float pad = range * 0.12f;
+            mn -= pad; range += pad * 2f;
+
+            int YOf(float val) => Mathf.Clamp(Mathf.RoundToInt((val - mn) / range * (h - 1)), 0, h - 1);
+
+            // Guideline band: faint fill between the bounds, solid ±1 edge lines,
+            // and the baseline (band centre) on the shared grid colour.
+            if (p.hasBounds)
+            {
+                int yLo = YOf(p.lower), yHi = YOf(p.upper);
+                for (int y = yLo; y <= yHi; y++)
+                    for (int x = 0; x < w; x++) p.buffer[y * w + x] = _boundBand;
+                for (int x = 0; x < w; x++) { p.buffer[yLo * w + x] = _boundEdge; p.buffer[yHi * w + x] = _boundEdge; }
+                int yBase = YOf((p.lower + p.upper) * 0.5f);
+                for (int x = 0; x < w; x++) p.buffer[yBase * w + x] = _grid;
+            }
+            else
+            {
+                int midY = h / 2;
+                for (int x = 0; x < w; x++) p.buffer[midY * w + x] = _grid;
+            }
+
+            // Waveform on top — segments outside the band drawn in the clip colour.
+            if (dataAny)
+            {
                 int prevY = -1;
                 for (int x = 0; x < w; x++)
                 {
                     float v = p.history[x];
-                    if (float.IsNaN(v)) continue;
-                    float t = (v - mn) / range;
-                    int yy = Mathf.Clamp(Mathf.RoundToInt(t * (h - 1)), 0, h - 1);
+                    if (float.IsNaN(v)) { prevY = -1; continue; }
+                    int yy = YOf(v);
                     if (prevY < 0) prevY = yy;
+                    bool outOfBand = p.hasBounds && (v < p.lower || v > p.upper);
+                    Color32 c = outOfBand ? _clipLine : CurrentLineColor;
                     int y0 = Mathf.Min(prevY, yy), y1 = Mathf.Max(prevY, yy);
-                    for (int k = y0; k <= y1; k++) p.buffer[k * w + x] = lineColor;
+                    for (int k = y0; k <= y1; k++) p.buffer[k * w + x] = c;
                     prevY = yy;
                 }
             }

@@ -14,21 +14,28 @@ namespace Delphi.Trial
     /// Orchestrates one optimization trial, started from the dashboard:
     ///
     ///   Idle → Baseline (stationary, N s; only the last part is averaged)
-    ///        → per iteration: apply BO-suggested driving parameters to the
-    ///          ego car → washout → measure window (means via DelphiCore's
-    ///          sampling thread) → submit baseline-corrected deltas to the
-    ///          optimizer → repeat
+    ///        → per iteration: RAMP the BO-suggested driving parameters onto
+    ///          the ego car → washout → measure window (means via DelphiCore's
+    ///          sampling thread) → submit baseline-anchored objectives → repeat
     ///        → Finished (after the configured iteration budget).
     ///
     /// The optimizer is mobo.py (BoTorch qLogNEHVI) via BoBridge; objectives
-    /// are DISCOVERED at runtime: every scalar channel that is attached and
-    /// enabled on DelphiManager (and actually produced baseline data)
-    /// becomes one objective — per Patrik's spec, the MOBO optimizes all
-    /// attached measures. Window timing comes from the swappable
-    /// TrialWindowStrategy. All timing is DelphiClock, all window means are
-    /// computed on the core's sampling thread. The session recorder is
-    /// started/stopped with the trial, and a trial_log.csv is written into
-    /// the session folder.
+    /// are DISCOVERED at runtime: every scalar channel attached and enabled on
+    /// DelphiManager (and actually producing baseline data) becomes one
+    /// objective.
+    ///
+    /// NORMALIZATION (the whole point of this layer — see
+    /// ChannelNormalization.cs): NO z-scores. Each window's mean becomes a
+    /// signed deviation d = (mean − baseline) / (k · SD), where SD is a
+    /// LITERATURE value the researcher types in per channel (not the noisy
+    /// baseline's own spread) and k is a shared bound multiplier — so d = ±1
+    /// exactly at the baseline ± k·SD bounds. d is oriented (per-channel
+    /// "higher is better") and shaped by one shared activation (Linear / ReLU /
+    /// Tanh) into the value the optimizer MINIMIZES.
+    ///
+    /// Clean split of concerns: DelphiManager is concerned ONLY with acquiring
+    /// and cleaning real signals (raw native units → recorder + viz).
+    /// Everything BO-facing — bounds, activation, objectives — lives here.
     /// </summary>
     public class TrialManager : MonoBehaviour
     {
@@ -43,29 +50,54 @@ namespace Delphi.Trial
         public CarDriver carDriver;
         public SessionRecorder recorder;
         [Tooltip("Window logic for each iteration — FixedTrialWindow for the " +
-                 "plain '30 s per parameter set' scheme; fancier strategies " +
-                 "(event-aligned, contextual/cBO) plug in here later.")]
+                 "plain 'fixed seconds per parameter set' scheme; fancier " +
+                 "strategies (event-aligned, contextual/cBO) plug in here later.")]
         public TrialWindowStrategy windowStrategy;
+
+        [Header("Normalization → BO (see the per-channel table below)")]
+        [Tooltip("Shaping applied to every channel's signed deviation before it " +
+                 "goes to the optimizer. Linear = proportional both ways; ReLU = " +
+                 "only the bad direction is penalized (good direction → 0); Tanh " +
+                 "= smooth saturating. Shared by ALL channels.")]
+        public ActivationFunction activation = ActivationFunction.Linear;
+        [Tooltip("Bound half-width in SDs: each channel's bounds are " +
+                 "baseline ± k·SD, and a window's deviation reaches ±1 there. " +
+                 "3 ≈ covers 99.7% of the population per the literature SD.")]
+        [Min(0.1f)]
+        public float boundK = 3f;
+        [Tooltip("Per-channel literature SD + bad-direction. Auto-populated from " +
+                 "the plugged-in DelphiManager's enabled channels; edit the SDs " +
+                 "to your sourced numbers.")]
+        public List<ChannelNormalization> channelConfigs = new();
 
         [Header("Trial structure")]
         [Tooltip("Stationary baseline before the drive, seconds.")]
         [Min(10f)]
         public float baselineSeconds = 120f;
-        [Tooltip("Only this many seconds at the END of the baseline are " +
-                 "averaged into the reference values. Automatically raised " +
-                 "to the largest per-channel minimum among attached sensors " +
-                 "(see the timing panel below).")]
-        [Min(5f)]
-        public float baselineAveragingSeconds = 10f;
+        [Tooltip("Only this many seconds at the END of the baseline are averaged " +
+                 "into the reference means. 30 s per the '30 s everywhere' decision.")]
+        [Min(1f)]
+        public float baselineAveragingSeconds = 30f;
         [Tooltip("Total number of parameter sets the optimizer gets to try " +
                  "(= BO iterations). Total trial time is shown below.")]
         [Min(2)]
         public int iterations = 56;
         [Tooltip("How many of those iterations are quasi-random (Sobol) " +
-                 "exploration before model-guided optimization starts. " +
-                 "Rule of thumb: ~2 per parameter dimension.")]
+                 "exploration before model-guided optimization starts. Rule of " +
+                 "thumb: ~2 per parameter dimension.")]
         [Min(1)]
         public int samplingIterations = 12;
+
+        [Header("Parameter transition")]
+        [Tooltip("When the optimizer hands over a new parameter set, ramp " +
+                 "LINEARLY from the current values to the new ones over this many " +
+                 "seconds instead of snapping — an instant jolt in driving style " +
+                 "is itself a startle stimulus that would contaminate the very " +
+                 "physiology we're measuring. Clamped to the window strategy's " +
+                 "washout so measurement never starts mid-ramp (a longer setting " +
+                 "is silently shortened, with a console warning).")]
+        [Min(0f)]
+        public float transitionSeconds = 3f;
 
         [Header("Optimizer")]
         [Tooltip("Empty = auto: the project-local venv at BOPythonEnv/bin/python3.")]
@@ -78,8 +110,8 @@ namespace Delphi.Trial
         public string groupId = "0";
 
         // ── Runtime state (read by TrialControlsUI / editor) ────────────
-        /// <summary>Where the python optimizer process/socket stands — for
-        /// the dashboard's connection indicator.</summary>
+        /// <summary>Where the python optimizer process/socket stands — for the
+        /// dashboard's connection indicator.</summary>
         public enum OptimizerStatus { NotStarted, Starting, Connected, Disconnected }
 
         public TrialState State { get; private set; } = TrialState.Idle;
@@ -101,17 +133,6 @@ namespace Delphi.Trial
         public double PhaseSecondsRemaining =>
             _phaseEnd > 0 ? Math.Max(0, _phaseEnd - DelphiClock.Now) : 0;
 
-        public float EffectiveBaselineAveragingSeconds
-        {
-            get
-            {
-                float eff = baselineAveragingSeconds;
-                foreach (var ch in CandidateChannels())
-                    eff = Mathf.Max(eff, TrialObjectiveInfo.MinWindowSeconds(ch));
-                return eff;
-            }
-        }
-
         private BoBridge _bo;
         private bool _trialActuallyStarted; // false until past the "can this even begin" checks
         private double _trialStart;     // DelphiClock zero for the trial
@@ -119,28 +140,24 @@ namespace Delphi.Trial
         private double _phaseEnd;       // DelphiClock time the current phase ends
         private WindowAccumulator _acc; // active baseline/measure accumulator
         private double _measureStart;
+        // Per-channel baseline MEAN only — the spread that defines the bounds is
+        // the literature SD from channelConfigs, NOT measured here.
         private readonly Dictionary<Channel, float> _baseline = new();
-        // Baseline standard deviation per channel — every window's delta is
-        // divided by this (z-scored) before being sent to the optimizer, so
-        // a participant whose signal barely moves gets the same effective
-        // resolution as one who swings wildly, instead of a fixed generic
-        // native-unit bound treating both the same.
-        private readonly Dictionary<Channel, float> _baselineSd = new();
         private List<Channel> _objectiveChannels = new();
         private Dictionary<string, float> _lastParams = new();
         private StreamWriter _trialLog;
 
-        // Objectives are sent to the optimizer as z-scores (delta / baseline
-        // SD), bounded to ±ZMax — six SDs is generous enough that a real
-        // clamp almost never triggers. Target semantics (confirmed 2026-07-
-        // 09): arousal-type channels (HigherIsWorse) minimize |z| — optimum
-        // is z≈0, i.e. MATCHING baseline, not drifting arbitrarily calmer.
-        // RMSSD keeps its original flipped behaviour: maximize raw z (no
-        // absolute value) — suppressed HRV vs. baseline is bad, elevated
-        // HRV has no assumed ceiling, so there's no "target zero" for it.
-        private const float ZMax = 6f;
-        private const float ZEpsilon = 1e-3f; // SD floor — guards a dead-flat baseline (e.g. noiseless mock sensor)
+        // Parameter ramp — see ApplyParameters/TickTransition. _transTo is null
+        // when no ramp is in flight (steady state between iterations).
+        private Dictionary<string, float> _transFrom;
+        private Dictionary<string, float> _transTo;
+        private double _transStart;
+        private float _transDuration;
 
+        // All six axes stay in the code; a param DISABLED on CarDriver is excluded
+        // from the search space at SendInit (see IsParamOn) — which is how the v1
+        // "4 parameters" decision is expressed: untick takeoverProbability and
+        // speedBelowLimit on the CarDriver, no code change needed.
         private static readonly string[] ParameterKeys =
         {
             "accelerationJerk", "brakingJerk", "followDistance",
@@ -161,10 +178,10 @@ namespace Delphi.Trial
             if (State != TrialState.Idle && State != TrialState.Finished && State != TrialState.Error)
                 return false;
 
-            // Reset before the early-return checks below — otherwise a
-            // failed attempt after a previously SUCCESSFUL trial would
-            // inherit that trial's stale _trialStart/_driveStart and write
-            // a nonsense trial_meta.json.
+            // Reset before the early-return checks below — otherwise a failed
+            // attempt after a previously SUCCESSFUL trial would inherit that
+            // trial's stale _trialStart/_driveStart and write a nonsense
+            // trial_meta.json.
             _trialActuallyStarted = false;
 
             if (manager == null || manager.Core == null) return Fail("No DelphiManager/core running.");
@@ -173,8 +190,8 @@ namespace Delphi.Trial
             if (CandidateChannels().Count < 2)
                 return Fail("mobo.py needs ≥2 objectives — attach and enable at least two scalar sensors on DelphiManager.");
 
-            // Recording runs for the whole trial; csv + videos + trial log
-            // all land in one session folder.
+            // Recording runs for the whole trial; csv + videos + trial log all
+            // land in one session folder.
             if (recorder != null && !recorder.IsRecording)
                 recorder.StartRecording($"trial_{userId}_{conditionId}");
 
@@ -198,12 +215,13 @@ namespace Delphi.Trial
             Iteration = 0;
             LastCoverage = float.NaN;
             _baseline.Clear();
-            _baselineSd.Clear();
             _acc = null;
+            _transTo = null;
             State = TrialState.Baseline;
             StatusLine = "Baseline — participant sits still";
-            Debug.Log($"[Trial] Started: baseline {baselineSeconds:0}s, then {iterations} × " +
-                      $"{windowStrategy.WindowSeconds:0}s windows.");
+            Debug.Log($"[Trial] Started: baseline {baselineSeconds:0}s (avg last {baselineAveragingSeconds:0}s), " +
+                      $"then {iterations} × {windowStrategy.WindowSeconds:0}s windows. " +
+                      $"Activation={activation}, k={boundK}.");
             return true;
         }
 
@@ -219,6 +237,10 @@ namespace Delphi.Trial
         // ── State machine ───────────────────────────────────────────────
         private void Update()
         {
+            // Independent of State — a ramp started as we entered Washout must
+            // keep advancing every frame until it completes.
+            TickTransition();
+
             switch (State)
             {
                 case TrialState.Baseline:            TickBaseline(); break;
@@ -241,7 +263,7 @@ namespace Delphi.Trial
             _bo.TryConnect(); // non-blocking; python needs a few seconds to boot
 
             // Install the accumulator only for the trailing averaging span.
-            double avgStart = _phaseEnd - EffectiveBaselineAveragingSeconds;
+            double avgStart = _phaseEnd - baselineAveragingSeconds;
             if (_acc == null && DelphiClock.Now >= avgStart)
             {
                 _acc = new WindowAccumulator();
@@ -250,10 +272,12 @@ namespace Delphi.Trial
 
             if (DelphiClock.Now < _phaseEnd) return;
 
-            // Baseline over — snapshot reference mean AND spread (SD), the
-            // latter being what every later window's delta gets divided by.
+            // Baseline over — snapshot the per-channel reference MEAN. The bounds
+            // come from baseline ± k·(literature SD), NOT from anything measured
+            // in this window.
             manager.Core.Accumulator = null;
             _objectiveChannels = new List<Channel>();
+            _baseline.Clear();
             foreach (var ch in CandidateChannels())
             {
                 var (mean, count) = _acc.Mean(ch);
@@ -262,12 +286,12 @@ namespace Delphi.Trial
                     Debug.LogWarning($"[Trial] {ch} produced no baseline samples — excluded from objectives.");
                     continue;
                 }
-                float sd = _acc.StdDev(ch);
-                if (float.IsNaN(sd)) sd = 0f; // exactly 1 sample — treat as zero spread, ZEpsilon floors it later
                 _baseline[ch] = mean;
-                _baselineSd[ch] = sd;
                 _objectiveChannels.Add(ch);
-                Debug.Log($"[Trial] Baseline {ch}: mean {mean:F2}, SD {sd:F2} ({count} samples)");
+                var cfg = EffectiveConfig(ch);
+                var (lo, hi) = ChannelMath.Bounds(mean, cfg.sd, boundK);
+                Debug.Log($"[Trial] Baseline {ch}: mean {mean:F2} ({count} samples) → bounds [{lo:F2}, {hi:F2}] " +
+                          $"(SD {cfg.sd}, {(cfg.higherIsBetter ? "higher is better" : "higher is worse")})");
             }
             _acc = null;
 
@@ -357,13 +381,12 @@ namespace Delphi.Trial
         }
 
         // Mirrors what CarDriver's OWN driving logic actually checks (see
-        // CarDriver.cs — accelerationJerkOn/brakingJerkOn/speedBelowLimitOn
-        // gate their DrivingParameters property; followDistanceOn/
-        // corneringSpeedOn are checked at the call site instead — either
-        // way, off means the axis provably has zero effect on the car).
-        // A disabled axis is EXCLUDED from the search space entirely, not
-        // sent as a dimension the optimizer wastes budget exploring for no
-        // signal — it just sits at whatever value it already has.
+        // CarDriver.cs — accelerationJerkOn/brakingJerkOn/speedBelowLimitOn gate
+        // their DrivingParameters property; followDistanceOn/corneringSpeedOn are
+        // checked at the call site instead — either way, off means the axis
+        // provably has zero effect on the car). A disabled axis is EXCLUDED from
+        // the search space entirely, not sent as a dimension the optimizer wastes
+        // budget exploring for no signal — it just sits at its current value.
         private bool IsParamOn(string key) => key switch
         {
             "accelerationJerk"    => carDriver.parameters.accelerationJerkOn,
@@ -378,8 +401,8 @@ namespace Delphi.Trial
         private List<string> _activeParamKeys = new();
 
         // ── Optimizer messages ──────────────────────────────────────────
-        /// <summary>Returns false (and calls Fail) if there's nothing left
-        /// to search over — mobo.py requires nParameters >= 1.</summary>
+        /// <summary>Returns false (and calls Fail) if there's nothing left to
+        /// search over — mobo.py requires nParameters >= 1.</summary>
         private bool SendInit()
         {
             _activeParamKeys = ParameterKeys.Where(IsParamOn).ToList();
@@ -393,17 +416,15 @@ namespace Delphi.Trial
             foreach (var key in _activeParamKeys)
                 parameters.Add(new JObject { ["key"] = key, ["init"] = "0,1" });
 
-            // Bounds are in Z-SCORE units, not native units — see the ZMax
-            // doc comment. Arousal-type channels target baseline (minimize
-            // |z| over [0,ZMax]); RMSSD keeps maximizing raw z over
-            // [-ZMax,ZMax] (elevated HRV vs. baseline has no assumed ceiling).
+            // Objective bounds are in ACTIVATION-OUTPUT units, and the optimizer
+            // always MINIMIZES (the per-channel "higher is better" flip already
+            // put the bad direction on the positive side). ReLU collapses the good
+            // direction to 0 → range [0,1]; Linear/Tanh keep both → [-1,1].
+            var (lo, hi) = ChannelMath.ObjectiveRange(activation);
             var objectives = new JArray();
             foreach (var ch in _objectiveChannels)
             {
-                bool targetBaseline = TrialObjectiveInfo.HigherIsWorse(ch);
-                string objInit = targetBaseline
-                    ? string.Format(CultureInfo.InvariantCulture, "{0},{1},{2}", 0, ZMax, 1)
-                    : string.Format(CultureInfo.InvariantCulture, "{0},{1},{2}", -ZMax, ZMax, 0);
+                string objInit = string.Format(CultureInfo.InvariantCulture, "{0},{1},{2}", lo, hi, 1);
                 objectives.Add(new JObject { ["key"] = ch.ToString(), ["init"] = objInit });
             }
 
@@ -435,24 +456,81 @@ namespace Delphi.Trial
             Debug.Log($"[Trial] Init sent: {_activeParamKeys.Count} parameters " +
                       $"({string.Join(", ", _activeParamKeys)})" +
                       (excluded.Count > 0 ? $" — excluded (disabled on CarDriver): {string.Join(", ", excluded)}" : "") +
-                      $", {_objectiveChannels.Count} objectives ({string.Join(", ", _objectiveChannels)}).");
+                      $", {_objectiveChannels.Count} objectives ({string.Join(", ", _objectiveChannels)}), " +
+                      $"activation {activation} range [{lo},{hi}] minimize.");
             return true;
         }
 
+        /// <summary>Starts a ramp toward the optimizer's new parameter set rather
+        /// than snapping to it — TickTransition advances it every frame
+        /// thereafter. Snapping would itself be a sudden jolt in driving
+        /// behaviour, i.e. a startle stimulus contaminating the very physiology
+        /// the next window measures.</summary>
         private void ApplyParameters(JObject values)
         {
             var p = carDriver.parameters;
-            p.accelerationJerk    = Get(values, "accelerationJerk",    p.accelerationJerk);
-            p.brakingJerk         = Get(values, "brakingJerk",         p.brakingJerk);
-            p.followDistance      = Get(values, "followDistance",      p.followDistance);
-            p.corneringSpeed      = Get(values, "corneringSpeed",      p.corneringSpeed);
-            p.takeoverProbability = Get(values, "takeoverProbability", p.takeoverProbability);
-            p.speedBelowLimit     = Get(values, "speedBelowLimit",     p.speedBelowLimit);
+            _transFrom = new Dictionary<string, float>();
+            _transTo = new Dictionary<string, float>();
+            foreach (var key in ParameterKeys)
+            {
+                float current = GetParam(p, key);
+                _transFrom[key] = current;
+                _transTo[key] = Get(values, key, current);
+            }
+            _transStart = DelphiClock.Now;
+
+            float washout = windowStrategy != null ? windowStrategy.WashoutSeconds : 0f;
+            _transDuration = Mathf.Clamp(transitionSeconds, 0f, washout);
+            if (transitionSeconds > washout)
+                Debug.LogWarning($"[Trial] transitionSeconds ({transitionSeconds:0.#}s) exceeds the washout " +
+                                 $"({washout:0.#}s) — clamped to {_transDuration:0.#}s so measurement never " +
+                                 "starts mid-ramp.");
 
             _lastParams = new Dictionary<string, float>();
             foreach (var prop in values.Properties()) _lastParams[prop.Name] = (float)prop.Value;
 
-            Debug.Log($"[Trial] Applied parameter set #{Iteration + 1}: {values.ToString(Newtonsoft.Json.Formatting.None)}");
+            Debug.Log($"[Trial] Applied parameter set #{Iteration + 1} (ramping over {_transDuration:0.#}s): " +
+                      $"{values.ToString(Newtonsoft.Json.Formatting.None)}");
+        }
+
+        /// <summary>Advances the in-flight ramp (if any) by linearly interpolating
+        /// every driving-parameter axis from its pre-suggestion value to the
+        /// optimizer's target. A no-op once the ramp completes (_transTo goes
+        /// null) until the next ApplyParameters call.</summary>
+        private void TickTransition()
+        {
+            if (_transTo == null || carDriver == null) return;
+            float t = _transDuration > 0f
+                ? Mathf.Clamp01((float)((DelphiClock.Now - _transStart) / _transDuration))
+                : 1f;
+            var p = carDriver.parameters;
+            foreach (var key in ParameterKeys)
+                SetParam(p, key, Mathf.Lerp(_transFrom[key], _transTo[key], t));
+            if (t >= 1f) _transTo = null;
+        }
+
+        private static float GetParam(DrivingParameters p, string key) => key switch
+        {
+            "accelerationJerk"    => p.accelerationJerk,
+            "brakingJerk"         => p.brakingJerk,
+            "followDistance"      => p.followDistance,
+            "corneringSpeed"      => p.corneringSpeed,
+            "takeoverProbability" => p.takeoverProbability,
+            "speedBelowLimit"     => p.speedBelowLimit,
+            _                     => 0f
+        };
+
+        private static void SetParam(DrivingParameters p, string key, float v)
+        {
+            switch (key)
+            {
+                case "accelerationJerk":    p.accelerationJerk    = v; break;
+                case "brakingJerk":         p.brakingJerk         = v; break;
+                case "followDistance":      p.followDistance      = v; break;
+                case "corneringSpeed":      p.corneringSpeed      = v; break;
+                case "takeoverProbability": p.takeoverProbability = v; break;
+                case "speedBelowLimit":     p.speedBelowLimit     = v; break;
+            }
         }
 
         private static string FormatDict(Dictionary<string, float> d) =>
@@ -466,53 +544,85 @@ namespace Delphi.Trial
 
         private void SubmitObjectives()
         {
-            var objectiveValues = new Dictionary<string, float>(); // what's actually sent to the optimizer (z-scores)
-            var deltasForLog = new Dictionary<string, float>();    // native-unit deltas, for the console line
+            var objectiveValues = new Dictionary<string, float>();  // sent to the optimizer (activation output)
+            var deviationsForLog = new Dictionary<string, float>(); // signed d, for the console line
             var logCells = new List<string>();
             foreach (var ch in _objectiveChannels)
             {
+                var cfg = EffectiveConfig(ch);
                 var (mean, count) = _acc.Mean(ch);
-                float delta;
+                float baseline = _baseline[ch];
+                float d;
+                bool clipped;
+
                 if (count == 0)
                 {
-                    // No data this window (sensor dropout): report "no change"
-                    // rather than crashing the optimizer, but say so loudly.
-                    Debug.LogWarning($"[Trial] {ch} delivered no samples in window {Iteration} — submitting z 0.");
-                    delta = 0f;
-                    mean = _baseline[ch];
+                    // No data this window (sensor dropout): submit the
+                    // baseline-neutral objective rather than crashing the
+                    // optimizer, but say so loudly.
+                    Debug.LogWarning($"[Trial] {ch} delivered no samples in window {Iteration} — submitting neutral objective.");
+                    mean = baseline; d = 0f; clipped = false;
                 }
                 else
                 {
-                    delta = mean - _baseline[ch];
+                    d = ChannelMath.Deviation(mean, baseline, cfg.sd, boundK);
+                    clipped = ChannelMath.IsClipped(d);
                 }
-                // Safety clamp on the RAW native-unit delta first (guards a
-                // corrupted single-window mean), THEN z-score by dividing by
-                // this channel's baseline SD (ZEpsilon floors a dead-flat
-                // baseline so a near-zero SD never explodes the ratio).
-                float nativeCap = TrialObjectiveInfo.DeltaRange(ch);
-                delta = Mathf.Clamp(delta, -nativeCap, nativeCap);
-                float sd = Mathf.Max(_baselineSd[ch], ZEpsilon);
-                float z = delta / sd;
+                float objective = ChannelMath.Objective(d, cfg.higherIsBetter, activation);
 
-                bool targetBaseline = TrialObjectiveInfo.HigherIsWorse(ch);
-                float objectiveValue = targetBaseline
-                    ? Mathf.Clamp(Mathf.Abs(z), 0f, ZMax)   // minimize distance FROM baseline
-                    : Mathf.Clamp(z, -ZMax, ZMax);          // maximize raw z (RMSSD: higher than baseline is fine)
-
-                objectiveValues[ch.ToString()] = objectiveValue;
-                deltasForLog[ch.ToString()] = delta;
-                logCells.Add(F(_baseline[ch])); logCells.Add(F(mean)); logCells.Add(F(delta));
-                logCells.Add(F(sd)); logCells.Add(F(z));
+                objectiveValues[ch.ToString()] = objective;
+                deviationsForLog[ch.ToString()] = d;
+                logCells.Add(F(baseline)); logCells.Add(F(mean)); logCells.Add(F(d));
+                logCells.Add(F(objective)); logCells.Add(clipped ? "1" : "0");
             }
 
             Debug.Log($"[Trial] Iteration {Iteration}/{iterations} result — " +
                       $"params: {{{FormatDict(_lastParams)}}} | " +
-                      $"native deltas (vs. baseline): {{{FormatDict(deltasForLog)}}} | " +
-                      $"z-scored objectives sent: {{{FormatDict(objectiveValues)}}}");
+                      $"deviations d (vs. baseline, in bound units): {{{FormatDict(deviationsForLog)}}} | " +
+                      $"objectives sent (minimize): {{{FormatDict(objectiveValues)}}}");
 
             _bo.SendObjectives(objectiveValues);
             WriteTrialLogRow(logCells);
         }
+
+        // ── Per-channel normalization config ────────────────────────────
+        /// <summary>The config the researcher edited for this channel, or null if
+        /// none exists yet.</summary>
+        public ChannelNormalization ConfigFor(Channel ch)
+        {
+            foreach (var c in channelConfigs)
+                if (c != null && c.channel == ch) return c;
+            return null;
+        }
+
+        /// <summary>Never-null config: falls back to literature-placeholder
+        /// defaults so a missing row can't crash a running trial.</summary>
+        private ChannelNormalization EffectiveConfig(Channel ch)
+        {
+            var c = ConfigFor(ch);
+            if (c != null) return c;
+            return new ChannelNormalization
+            {
+                channel = ch,
+                sd = ChannelMath.DefaultSd(ch),
+                higherIsBetter = ChannelMath.DefaultHigherIsBetter(ch)
+            };
+        }
+
+        /// <summary>Native-unit bounds baseline ± k·SD once the baseline has been
+        /// captured — for the dashboard's guideline bands / clip flag. False
+        /// before the baseline exists for this channel.</summary>
+        public bool TryGetBounds(Channel ch, out float lower, out float upper)
+        {
+            lower = upper = float.NaN;
+            if (!_baseline.TryGetValue(ch, out float b)) return false;
+            var cfg = EffectiveConfig(ch);
+            (lower, upper) = ChannelMath.Bounds(b, cfg.sd, boundK);
+            return true;
+        }
+
+        public ActivationFunction ActivationFn => activation;
+        public IReadOnlyList<Channel> ObjectiveChannels => _objectiveChannels;
 
         // ── Trial log ───────────────────────────────────────────────────
         private void OpenTrialLog()
@@ -526,10 +636,11 @@ namespace Delphi.Trial
             var header = new StringBuilder("iteration,t_measure_start_s,t_measure_end_s");
             foreach (var key in ParameterKeys) header.Append(',').Append(key);
             foreach (var ch in _objectiveChannels)
-                // delta = native-unit deviation from baseline (clamped, pre-z);
-                // z = delta/baselineSd — the actual value sent to the optimizer
-                // is |z| for target-baseline channels, raw z for RMSSD-style ones.
-                header.Append($",{ch}_baseline,{ch}_mean,{ch}_delta,{ch}_baselineSd,{ch}_z");
+                // baseline = reference mean; mean = this window's mean;
+                // d = (mean−baseline)/(k·SD) signed deviation in bound units;
+                // objective = activation(oriented d) = the minimized value;
+                // clipped = 1 when |d|>1 (window left the baseline ± k·SD bound).
+                header.Append($",{ch}_baseline,{ch}_mean,{ch}_d,{ch}_objective,{ch}_clipped");
             header.Append(",coverage");
             _trialLog.WriteLine(header.ToString());
             _trialLog.Flush();
@@ -556,8 +667,9 @@ namespace Delphi.Trial
 
         // ── Trial meta ──────────────────────────────────────────────────
         // trial_meta.json — the summary a human (or a script auditing many
-        // sessions) reads first: how far the trial got, how fast, on what
-        // sensors, and what the six 0..1 axes physically meant.
+        // sessions) reads first: how far the trial got, how fast, on what sensors,
+        // how each channel was normalized, and what the driving axes physically
+        // meant.
         private void WriteTrialMeta(string endReason, string sessionPath)
         {
             try
@@ -570,19 +682,24 @@ namespace Delphi.Trial
                 foreach (var ch in _objectiveChannels)
                 {
                     var sensor = manager.GetSensor(ch);
+                    var cfg = EffectiveConfig(ch);
+                    float baseline = _baseline.TryGetValue(ch, out var b) ? b : float.NaN;
+                    var (lo, hi) = ChannelMath.Bounds(baseline, cfg.sd, boundK);
                     objectives.Add(new TrialObjectiveMeta
                     {
                         channel = ch.ToString(),
                         sensorType = sensor != null ? sensor.GetType().Name : "(none)",
                         sensorObjectName = sensor != null ? sensor.gameObject.name : "(none)",
-                        baselineMean = _baseline.TryGetValue(ch, out var b) ? b : float.NaN,
-                        baselineStdDev = _baselineSd.TryGetValue(ch, out var sd) ? sd : float.NaN,
-                        nativeDeltaSafetyBound = TrialObjectiveInfo.DeltaRange(ch),
-                        zScoreBound = ZMax,
-                        targetsBaseline = TrialObjectiveInfo.HigherIsWorse(ch)
+                        baselineMean = baseline,
+                        literatureSd = cfg.sd,
+                        boundK = boundK,
+                        lowerBound = lo,
+                        upperBound = hi,
+                        higherIsBetter = cfg.higherIsBetter
                     });
                 }
 
+                var (objLo, objHi) = ChannelMath.ObjectiveRange(activation);
                 var meta = new TrialMeta
                 {
                     userId = userId, conditionId = conditionId, groupId = groupId,
@@ -591,10 +708,15 @@ namespace Delphi.Trial
                     totalDurationSeconds = (float)(DelphiClock.Now - _trialStart),
 
                     baselineSeconds = baselineSeconds,
-                    baselineAveragingSecondsEffective = EffectiveBaselineAveragingSeconds,
+                    baselineAveragingSeconds = baselineAveragingSeconds,
                     windowSeconds = windowStrategy != null ? windowStrategy.WindowSeconds : 0f,
                     washoutSeconds = windowStrategy != null ? windowStrategy.WashoutSeconds : 0f,
                     measureSeconds = windowStrategy != null ? windowStrategy.MeasureSeconds : 0f,
+                    transitionSeconds = transitionSeconds,
+
+                    activation = activation.ToString(),
+                    objectiveRangeLo = objLo,
+                    objectiveRangeHi = objHi,
 
                     iterationsPlanned = iterations,
                     iterationsCompleted = Iteration,
@@ -660,8 +782,8 @@ namespace Delphi.Trial
 
         // ── Helpers / teardown ──────────────────────────────────────────
         /// <summary>Channels eligible as objectives: attached AND enabled on
-        /// DelphiManager (whether they also deliver data is settled at the
-        /// end of the baseline).</summary>
+        /// DelphiManager (whether they also deliver data is settled at the end of
+        /// the baseline).</summary>
         public List<Channel> CandidateChannels()
         {
             var list = new List<Channel>();
@@ -688,6 +810,7 @@ namespace Delphi.Trial
         {
             if (manager != null && manager.Core != null) manager.Core.Accumulator = null;
             _acc = null;
+            _transTo = null; // don't let a ramp outlive the trial that started it
             _bo?.Dispose();
             _bo = null;
             _trialLog?.Close();

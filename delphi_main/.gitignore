@@ -1,0 +1,48 @@
+# Unity generated / cache folders — never commit these.
+# Their absence is also what makes `git status` crawl (it walks ~1GB of Library/).
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+
+# Asset meta data — only ignore for folders Unity itself ignores.
+/[Aa]ssets/AssetStoreTools*
+/[Aa]ssets/StreamingAssets/BOData/LogData/
+
+# Project-local Python venv for the BO optimizer (recreate from requirements.txt).
+/BOPythonEnv/
+
+# Generated assets
+/GeneratedAssets/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.idea/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+
+# Crash reports
+sysinfo.txt
+crashlytics-build.properties

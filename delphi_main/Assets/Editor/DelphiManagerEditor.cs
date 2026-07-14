@@ -108,6 +108,14 @@ namespace Delphi.EditorTools
             EditorGUILayout.EndVertical();
 
             serializedObject.ApplyModifiedProperties();
+            // An ON/OFF chip click sets onProp.boolValue directly rather than
+            // through a control that reliably flags GUI.changed, and the status
+            // dot's colour is computed BEFORE ApplyModifiedProperties commits
+            // that click — so without forcing a repaint the dot shows the
+            // PRE-click state until something else (mouse move, refocus) happens
+            // to redraw. Most visible outside Play mode, where
+            // RequiresConstantRepaint is off.
+            if (GUI.changed) Repaint();
         }
 
         // Header line for a scalar group, with that group's shared Hz field

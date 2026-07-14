@@ -3,12 +3,12 @@ using System;
 namespace Delphi.Trial
 {
     /// <summary>
-    /// trial_meta.json — written once per trial (finished, aborted, or
-    /// failed) next to trial_log.csv. Answers, without re-deriving anything
-    /// from the raw logs: how many iterations actually ran, how long each
-    /// took on average, which sensors fed the optimizer and what their
-    /// baselines were, what the six driving-parameter axes physically mean,
-    /// and how the trial ended.
+    /// trial_meta.json — written once per trial (finished, aborted, or failed)
+    /// next to trial_log.csv. Answers, without re-deriving anything from the raw
+    /// logs: how many iterations actually ran, how long each took on average,
+    /// which sensors fed the optimizer, how each channel was normalized into its
+    /// objective, what the driving-parameter axes physically mean, and how the
+    /// trial ended.
     /// </summary>
     [Serializable]
     public class TrialMeta
@@ -19,17 +19,27 @@ namespace Delphi.Trial
         public float totalDurationSeconds;
 
         public float baselineSeconds;
-        public float baselineAveragingSecondsEffective;
+        public float baselineAveragingSeconds;
         public float windowSeconds;
         public float washoutSeconds;
         public float measureSeconds;
+        /// <summary>Configured ramp time toward each new parameter set; the
+        /// ACTUAL ramp used was min(this, washoutSeconds) — see TrialManager.</summary>
+        public float transitionSeconds;
+
+        /// <summary>Shared activation shaping every channel's deviation into the
+        /// minimized objective: "Linear", "ReLU" or "Tanh".</summary>
+        public string activation;
+        /// <summary>The objective value range implied by the activation
+        /// (ReLU → [0,1], Linear/Tanh → [-1,1]); the optimizer minimizes.</summary>
+        public float objectiveRangeLo, objectiveRangeHi;
 
         public int iterationsPlanned;
         public int iterationsCompleted;
         public int samplingIterationsPlanned;
         public int optimizationIterationsPlanned;
-        /// <summary>Wall-clock seconds per iteration, averaged over the
-        /// drive phase actually completed (baseline excluded).</summary>
+        /// <summary>Wall-clock seconds per iteration, averaged over the drive
+        /// phase actually completed (baseline excluded).</summary>
         public float averageIterationSeconds;
 
         public float finalHypervolumeCoverage;
@@ -37,12 +47,12 @@ namespace Delphi.Trial
         public int optimizerSeed;
         public string pythonPathUsed;
 
-        /// <summary>Session folder holding sensors.csv/videos for this
-        /// trial, if recording was running — empty otherwise.</summary>
+        /// <summary>Session folder holding sensors.csv/videos for this trial, if
+        /// recording was running — empty otherwise.</summary>
         public string sessionRecordingPath;
 
-        /// <summary>DelphiManager's scalar-group sample rates at trial
-        /// start — the acquisition rate behind every objective below.</summary>
+        /// <summary>DelphiManager's scalar-group sample rates at trial start —
+        /// the acquisition rate behind every objective below.</summary>
         public float goldStandardRateHz, goodAdditionsRateHz, experimentalRateHz;
 
         public TrialObjectiveMeta[] objectives;
@@ -53,17 +63,16 @@ namespace Delphi.Trial
     public class TrialObjectiveMeta
     {
         public string channel;
-        public string sensorType;      // e.g. "MockSensor_Scalar", "GSRSensorSerial"
+        public string sensorType;       // e.g. "MockSensor_Scalar", "GSRSensorSerial"
         public string sensorObjectName; // GameObject the sensor is on
-        public float baselineMean;
-        public float baselineStdDev;   // every window's delta is divided by this (z-score) before optimization
-        public float nativeDeltaSafetyBound; // raw native-unit delta is clamped to [-bound,+bound] BEFORE z-scoring
-        public float zScoreBound;      // the z-score itself is then clamped to this (symmetric or [0, bound] — see targetsBaseline)
-        /// <summary>true = optimizer minimizes |z| (target: match baseline,
-        /// deviating either direction is worse). false = optimizer maximizes
-        /// raw z with no target — currently only RMSSD (suppressed HRV vs.
-        /// baseline is bad; elevated HRV has no assumed ceiling).</summary>
-        public bool targetsBaseline;
+        public float baselineMean;      // reference mean over the baseline averaging window
+        public float literatureSd;      // native-unit SD the researcher supplied (NOT measured from baseline)
+        public float boundK;            // bound half-width in SDs: bounds = baselineMean ± boundK·literatureSd
+        public float lowerBound, upperBound; // native-unit; a window mean here maps to deviation ∓1
+        /// <summary>false (default) = RISING above baseline is the penalized
+        /// direction (HR, GSR, arousal). true = DROPPING below baseline is
+        /// penalized (e.g. RMSSD — suppressed HRV means stress).</summary>
+        public bool higherIsBetter;
     }
 
     [Serializable]
@@ -72,9 +81,9 @@ namespace Delphi.Trial
         public string key;             // matches the 0..1 axis name sent to the optimizer
         public float physicalMin, physicalMax; // native units that 0 and 1 map to
         public string unit;
-        /// <summary>False = excluded from the optimizer's search space this
-        /// trial (disabled on CarDriver — provably no effect on the car),
-        /// held fixed at its current value instead.</summary>
+        /// <summary>False = excluded from the optimizer's search space this trial
+        /// (disabled on CarDriver — provably no effect on the car), held fixed at
+        /// its current value instead.</summary>
         public bool active;
     }
 }
