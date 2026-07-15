@@ -4,11 +4,9 @@ namespace Delphi.Simulation
 {
     /// <summary>
     /// Kinematic base for a vehicle on the Track. Single lane, no traffic —
-    /// just route-space position and jerk-limited speed control. Owns
-    /// MECHANICS only:
+    /// just route-space position and speed control. Owns MECHANICS only:
     ///
     ///   - route-space state: S (arc-length position, metres), Speed (m/s),
-    ///     jerk-limited Acceleration,
     ///   - placement: transform position/heading from route space.
     ///
     /// Deliberately NOT here: target-speed computation, red-light/corner
@@ -26,8 +24,6 @@ namespace Delphi.Simulation
         // ── Route-space state ───────────────────────────────────────────
         public float S { get; protected set; }
         public float Speed { get; protected set; }
-
-        protected float Acceleration;
 
         // Heading support
         private Vector3 _lastPos;
@@ -49,7 +45,6 @@ namespace Delphi.Simulation
         {
             S = Mathf.Clamp(s, 0f, track.TotalLength);
             Speed = Mathf.Max(0f, speed);
-            Acceleration = 0f;
             _hasLastPos = false;
             transform.position = track.EvaluatePosition(S);
             Vector3 fwd = track.EvaluateTangent(S);
@@ -59,32 +54,23 @@ namespace Delphi.Simulation
         }
 
         // ── Speed control ───────────────────────────────────────────────
-        /// <summary>Jerk-limited acceleration toward a target acceleration —
-        /// the abruptness knob. Acceleration RAMPS toward the target, capped
-        /// by a rate-of-change (jerk) limit, so accel/brake style parameters
-        /// control how sudden speed changes FEEL, not just their magnitude.</summary>
-        protected void StepAccel(float targetAccel, float accelJerk, float brakeJerk,
-                                 float maxAccel, float maxDecel, float dt)
+        /// <summary>Move Speed directly toward targetSpeed at a CONSTANT
+        /// magnitude — accelMagnitude when speeding up, brakeMagnitude when
+        /// slowing down. No separate physical ceiling and no ramping toward
+        /// one: the magnitude IS the driving-style parameter (already mapped
+        /// from that axis's own Min/Max range), so gentle vs assertive is
+        /// visible for the WHOLE speed change, not a brief transient on the
+        /// way to some shared cap.</summary>
+        protected void StepSpeed(float targetSpeed, float accelMagnitude, float brakeMagnitude, float dt)
         {
-            float desired = Mathf.Clamp(targetAccel, -maxDecel, maxAccel);
-            float jerkLimit = desired >= Acceleration ? accelJerk : brakeJerk;
-            Acceleration = Mathf.MoveTowards(Acceleration, desired, jerkLimit * dt);
-            Speed = Mathf.Max(0f, Speed + Acceleration * dt);
-        }
-
-        /// <summary>Jerk-limited approach to a target SPEED.</summary>
-        protected void StepSpeed(float targetSpeed, float accelJerk, float brakeJerk,
-                                 float maxAccel, float maxDecel, float dt)
-        {
-            float desiredAccel = (targetSpeed - Speed) / Mathf.Max(dt, 0.0001f);
-            StepAccel(desiredAccel, accelJerk, brakeJerk, maxAccel, maxDecel, dt);
+            float magnitude = targetSpeed >= Speed ? accelMagnitude : brakeMagnitude;
+            Speed = Mathf.MoveTowards(Speed, targetSpeed, Mathf.Max(0.01f, magnitude) * dt);
         }
 
         /// <summary>Hard-set speed (red-light waits etc.).</summary>
         protected void HoldStopped()
         {
             Speed = 0f;
-            Acceleration = 0f;
         }
 
         // ── Placement ───────────────────────────────────────────────────

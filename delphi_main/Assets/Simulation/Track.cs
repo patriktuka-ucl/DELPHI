@@ -27,7 +27,7 @@ namespace Delphi.Simulation
         [Header("Road")]
         public SplineContainer splineContainer;
 
-        [Tooltip("Posted speed limit anywhere no SpeedZone event overrides it.")]
+        [Tooltip("Posted speed limit anywhere no Cruise zone overrides it.")]
         public float defaultSpeedLimitKmh = 50f;
 
         [Header("Arc-length sampling")]
@@ -36,11 +36,12 @@ namespace Delphi.Simulation
         public float samplesPerMeter = 1f;
 
         [Header("Debug")]
-        [Tooltip("Draw the driving line and distance markers. Also builds an " +
-                 "actual LineRenderer at Play so the track is visible in the " +
-                 "GAME view / a build, not just the Editor Scene view " +
-                 "(Gizmos never render there without the Game view's own " +
-                 "Gizmos toggle).")]
+        [Tooltip("Draw the driving line, event markers, and distance labels. " +
+                 "The line/markers are REAL geometry (built and kept live in " +
+                 "BOTH edit and Play mode), so they're visible in Scene AND " +
+                 "Game view with no Gizmos-toggle dependency; the distance-" +
+                 "marker labels are Scene-view Gizmos on top (need that " +
+                 "view's own Gizmos toggle).")]
         public bool showDebugGizmos = true;
         [Tooltip("Spacing (m) between the small distance-marker dots/labels " +
                  "(Scene-view gizmo only).")]
@@ -71,8 +72,16 @@ namespace Delphi.Simulation
         private float[] _cumS;        // cumulative arc length at uniform t samples
         private int _sampleCount;
         private readonly List<TrackEvent> _events = new();
-        private readonly List<TrackEvent> _redLights = new();     // sorted by S
-        private readonly List<TrackEvent> _speedZones = new();    // sorted by S
+        private readonly List<TrackEvent> _stops = new();     // StopAndGo, sorted by S
+        private readonly List<TrackEvent> _cruiseZones = new(); // Cruise, sorted by S
+        private readonly List<TrackEvent> _turns = new();      // Turn, sorted by S
+
+        /// <summary>Cruise zones (speed overrides), sorted by S — for authoring/analysis.</summary>
+        public IReadOnlyList<TrackEvent> CruiseZones => _cruiseZones;
+        /// <summary>Stop events, sorted by S.</summary>
+        public IReadOnlyList<TrackEvent> Stops => _stops;
+        /// <summary>Turn context markers, sorted by S.</summary>
+        public IReadOnlyList<TrackEvent> Turns => _turns;
         private bool _built;
         private double _lastEditorBuildTime;
         private GameObject _debugLineRoot;
@@ -87,31 +96,72 @@ namespace Delphi.Simulation
             IsReady = true;
             OnTrackReady?.Invoke();
             Debug.Log($"[Track] Ready — {TotalLength:F0} m, {_events.Count} events " +
-                      $"({_redLights.Count} red lights, {_speedZones.Count} speed zones).");
+                      $"({_stops.Count} stops, {_cruiseZones.Count} cruise zones, {_turns.Count} turns).");
 
-            BuildDebugLine();
+            RefreshDebugVisual();
         }
 
-        // Toggling the checkbox mid-Play just flips visibility — cheap.
+        // [ExecuteAlways]: also runs in Edit mode, e.g. on scene load or when
+        // the component is (re)enabled — so the road is visible immediately,
+        // not only after pressing Play or waiting on a Gizmo repaint.
+        private void OnEnable()
+        {
+            if (splineContainer == null) splineContainer = GetComponent<SplineContainer>();
+            if (Application.isPlaying) return;
+            EnsureBuilt(force: true);
+            RefreshDebugVisual();
+        }
+
+#if UNITY_EDITOR
+        private double _lastDebugVisualRefreshTime;
+#endif
+
         private void Update()
         {
+            // Toggling the checkbox just flips visibility — cheap.
             if (_debugLineRoot != null && _debugLineRoot.activeSelf != showDebugGizmos)
                 _debugLineRoot.SetActive(showDebugGizmos);
+
+#if UNITY_EDITOR
+            // Keep the road line (and every TrackEvent's own marker, which
+            // reads this same geometry indirectly via Track) live while
+            // dragging spline knots or event markers around in Edit mode.
+            // Play mode geometry is static once Awake runs — no need to
+            // rebuild every frame there.
+            if (!Application.isPlaying && showDebugGizmos)
+            {
+                double now = UnityEditor.EditorApplication.timeSinceStartup;
+                if (now - _lastDebugVisualRefreshTime > 0.25)
+                {
+                    _lastDebugVisualRefreshTime = now;
+                    EnsureBuiltEditor();
+                    RefreshDebugVisual();
+                }
+            }
+#endif
         }
 
         // One LineRenderer per constant-limit section, coloured by that
-        // section's posted limit, so the Game view shows exactly where each
-        // speed regime starts and ends.
-        private void BuildDebugLine()
+        // section's posted limit — REAL geometry (not a Gizmo), visible in
+        // Scene AND Game view regardless of any Gizmos toggle, live in both
+        // Edit and Play mode. Edit-mode-built objects are marked DontSave so
+        // they never bloat the scene file — they're rebuilt fresh whenever
+        // the scene (re)loads via OnEnable.
+        private void RefreshDebugVisual()
         {
+            if (_debugLineRoot != null) DestroyImmediateOrRuntime(_debugLineRoot);
+            _debugLines.Clear();
+            _debugLineRoot = null;
             if (_sampleCount == 0) return;
-            _debugLineRoot = new GameObject("[debug] Track line");
+
+            _debugLineRoot = new GameObject("[debug] Track line") { hideFlags = HideFlags.DontSave };
             _debugLineRoot.transform.SetParent(transform, false);
-            var mat = new Material(Shader.Find("Sprites/Default"));
+            var mat = new Material(Shader.Find("Sprites/Default")) { hideFlags = HideFlags.DontSave };
 
             foreach (var sec in GetSpeedSections())
             {
-                var go = new GameObject($"section {sec.startS:F0}-{sec.endS:F0}m @{sec.limitKmh:F0}kmh");
+                var go = new GameObject($"section {sec.startS:F0}-{sec.endS:F0}m @{sec.limitKmh:F0}kmh")
+                    { hideFlags = HideFlags.DontSave };
                 go.transform.SetParent(_debugLineRoot.transform, false);
                 var lr = go.AddComponent<LineRenderer>();
                 lr.useWorldSpace = true;
@@ -132,6 +182,18 @@ namespace Delphi.Simulation
                 _debugLines.Add(lr);
             }
             _debugLineRoot.SetActive(showDebugGizmos);
+        }
+
+        private void OnDisable()
+        {
+            if (_debugLineRoot != null) DestroyImmediateOrRuntime(_debugLineRoot);
+            _debugLineRoot = null;
+            _debugLines.Clear();
+        }
+
+        private static void DestroyImmediateOrRuntime(UnityEngine.Object o)
+        {
+            if (Application.isPlaying) Destroy(o); else DestroyImmediate(o);
         }
 
         private void Reset() => splineContainer = GetComponent<SplineContainer>();
@@ -191,16 +253,23 @@ namespace Delphi.Simulation
         /// adding/moving markers at runtime (rare) — done automatically on build.</summary>
         public void RebuildEventIndex()
         {
-            _events.Clear(); _redLights.Clear(); _speedZones.Clear();
+            _events.Clear(); _stops.Clear(); _cruiseZones.Clear(); _turns.Clear();
             GetComponentsInChildren(includeInactive: false, _events);
             _events.Sort((a, b) => a.S.CompareTo(b.S));
-            foreach (var ev in _events)
+            for (int i = 0; i < _events.Count; i++)
             {
+                var ev = _events[i];
                 switch (ev.kind)
                 {
-                    case TrackEventKind.RedLight:  _redLights.Add(ev);  break;
-                    case TrackEventKind.SpeedZone: _speedZones.Add(ev); break;
+                    case TrackEventKind.StopAndGo: _stops.Add(ev);       break;
+                    case TrackEventKind.Cruise:    _cruiseZones.Add(ev); break;
+                    case TrackEventKind.Turn:      _turns.Add(ev);       break;
                 }
+                // Descriptive, order-and-position GameObject name — kept live
+                // by the same throttled rebuild that keeps the LUT current, so
+                // it tracks dragging in the Hierarchy in near-real-time:
+                // "1 - StopAndGo (42 m)", "2 - Turn (68-71 m)".
+                ev.ApplyDisplayName(i + 1);
             }
         }
 
@@ -286,7 +355,7 @@ namespace Delphi.Simulation
             // Few zones, linear scan is fine; zones may not overlap (authoring
             // rule — last one wins if they do).
             float limit = defaultSpeedLimitKmh;
-            foreach (var z in _speedZones)
+            foreach (var z in _cruiseZones)
                 if (s >= z.S && s <= z.EndS) limit = z.limitKmh;
             return limit;
         }
@@ -301,7 +370,7 @@ namespace Delphi.Simulation
             if (TotalLength <= 0f) return sections;
 
             var edges = new List<float> { 0f, TotalLength };
-            foreach (var z in _speedZones)
+            foreach (var z in _cruiseZones)
             {
                 edges.Add(Mathf.Clamp(z.S, 0f, TotalLength));
                 edges.Add(Mathf.Clamp(z.EndS, 0f, TotalLength));
@@ -343,14 +412,14 @@ namespace Delphi.Simulation
         /// distance-remaining clamps to 0 once passed) until the vehicle
         /// actually latches the wait. Each vehicle keeps its own served set
         /// so it stops once per light and never re-stops while pulling away.</summary>
-        public bool TryNextRedLight(ICollection<TrackEvent> served,
-                                    out float stopS, out TrackEvent ev)
+        public bool TryNextStop(ICollection<TrackEvent> served,
+                                out float stopS, out TrackEvent ev)
         {
-            foreach (var rl in _redLights)
+            foreach (var st in _stops)
             {
-                if (served != null && served.Contains(rl)) continue;
-                stopS = rl.S;
-                ev = rl;
+                if (served != null && served.Contains(st)) continue;
+                stopS = st.S;
+                ev = st;
                 return true;
             }
             stopS = float.PositiveInfinity;

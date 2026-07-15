@@ -1,0 +1,2 @@
+UserID;ConditionID;GroupID;Timestamp;Iteration;Phase;IsPareto;HeartRate;RMSSD;GSR;accelerationJerk;brakingJerk;followDistance;corneringSpeed;takeoverProbability;speedBelowLimit
+P0;pilot;0;2026-07-15 00:52:58;1;sampling;FALSE;-0.017;-0.261;0.1;0.068;0.225;0.699;0.063;0.375;0.03

@@ -119,7 +119,7 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!1 &209452766
+--- !u!1 &81696301
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -127,51 +127,96 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 209452768}
-  - component: {fileID: 209452767}
+  - component: {fileID: 81696302}
+  - component: {fileID: 81696303}
   m_Layer: 0
-  m_Name: SessionControlsUI
+  m_Name: 2 - StopAndGo (21 m)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &209452767
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 209452766}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 4e4f8043ea6774c81b3dfaec47d2ebc5, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Delphi.SessionControlsUI
-  recorder: {fileID: 1798600215}
-  player: {fileID: 1798600217}
-  dashboardDisplay: 1
-  anchorMin: {x: 0.5, y: 0}
-  anchorMax: {x: 0.5, y: 0}
-  pivot: {x: 0.5, y: 0}
-  anchoredPosition: {x: 0, y: 20}
-  panelSize: {x: 1180, y: 150}
-  coarseStepSeconds: 1
---- !u!4 &209452768
+--- !u!4 &81696302
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 209452766}
+  m_GameObject: {fileID: 81696301}
   serializedVersion: 2
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.420784, y: 0, z: 20.891434}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 1532902269}
+  m_Father: {fileID: 2115074266}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &81696303
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 81696301}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fdc582c6b1c984d7ebb46b95d9a1cb1f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.Simulation.TrackEvent
+  kind: 0
+  s: 21.053436
+  endS: 21.053436
+  waitDuration: 3
+  limitKmh: 30
+--- !u!1 &95379955
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 95379956}
+  - component: {fileID: 95379957}
+  m_Layer: 0
+  m_Name: 1 - Turn (17-40 m)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &95379956
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 95379955}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -0.5630417, y: 0, z: 16.549023}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 2115074266}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &95379957
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 95379955}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fdc582c6b1c984d7ebb46b95d9a1cb1f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.Simulation.TrackEvent
+  kind: 2
+  s: 16.568012
+  endS: 40.2
+  waitDuration: 3
+  limitKmh: 30
 --- !u!1 &372333635
 GameObject:
   m_ObjectHideFlags: 0
@@ -253,10 +298,41 @@ MonoBehaviour:
   carDriver: {fileID: 2014745828}
   recorder: {fileID: 1798600215}
   windowStrategy: {fileID: 0}
+  activation: 0
+  boundK: 3
+  channelConfigs:
+  - channel: 0
+    sd: 10
+    higherIsBetter: 0
+  - channel: 1
+    sd: 20
+    higherIsBetter: 1
+  - channel: 2
+    sd: 3
+    higherIsBetter: 0
+  - channel: 3
+    sd: 50
+    higherIsBetter: 0
+  - channel: 4
+    sd: 5
+    higherIsBetter: 0
+  - channel: 5
+    sd: 0.3
+    higherIsBetter: 0
+  - channel: 6
+    sd: 0.5
+    higherIsBetter: 0
+  - channel: 7
+    sd: 20
+    higherIsBetter: 0
+  - channel: 8
+    sd: 0.3
+    higherIsBetter: 0
   baselineSeconds: 20
   baselineAveragingSeconds: 10
   iterations: 5
   samplingIterations: 3
+  transitionSeconds: 3
   pythonPath: 
   seed: 3
   userId: P0
@@ -302,7 +378,7 @@ GameObject:
   - component: {fileID: 745759215}
   - component: {fileID: 745759216}
   m_Layer: 0
-  m_Name: DashboardUI
+  m_Name: Experiment UI
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -332,18 +408,17 @@ MonoBehaviour:
   m_GameObject: {fileID: 745759214}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: a636d6c78fcf342a2ac6d4175afe82c3, type: 3}
+  m_Script: {fileID: 11500000, guid: 977ef822bb104eb3a0917ccf15840ff5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Delphi.DashboardUI
   manager: {fileID: 1745511443}
+  session: {fileID: 0}
+  trial: {fileID: 0}
+  recorder: {fileID: 0}
+  player: {fileID: 0}
   dashboardDisplay: 1
   editorPreviewOffset: {x: 0, y: 0}
-  redrawInterval: 0.05
-  cellWidth: 240
-  cellHeight: 60
-  columns: 3
-  colSpacing: 30
-  rowSpacing: 20
+  redrawFps: 10
 --- !u!1 &791336332
 GameObject:
   m_ObjectHideFlags: 0
@@ -533,7 +608,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 222246528aa0844878002a1f040e4d32, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MockSensor
   frequency: 0.15
   amplitude: 100
@@ -552,7 +627,7 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 0}
+  m_Father: {fileID: 1037761337}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &900000004
 GameObject:
@@ -581,7 +656,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 222246528aa0844878002a1f040e4d32, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MockSensor
   frequency: 0.05
   amplitude: 15
@@ -600,8 +675,82 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
+  m_Father: {fileID: 1037761337}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &900000010
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 900000011}
+  - component: {fileID: 900000012}
+  - component: {fileID: 900000013}
+  m_Layer: 0
+  m_Name: Session Controller
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &900000011
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 900000010}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &900000012
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 900000010}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ba171e195546f406bb038ad7d0819eab, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  trial: {fileID: 0}
+  guide: {fileID: 0}
+  firstCondition: 0
+  includeFreePlay: 1
+  introSeconds: 15
+  meditationSeconds: 60
+  habituationSeconds: 60
+  parkingSeconds: 10
+  onEmergencyStop:
+    m_PersistentCalls:
+      m_Calls: []
+  onResume:
+    m_PersistentCalls:
+      m_Calls: []
+--- !u!114 &900000013
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 900000010}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ce353277b79bd46d8bd0fc42081fec56, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  source: {fileID: 0}
+  clips: []
+  logLines: 1
 --- !u!1 &977851523
 GameObject:
   m_ObjectHideFlags: 0
@@ -733,7 +882,7 @@ Camera:
   far clip plane: 1000
   field of view: 130
   orthographic: 1
-  orthographic size: 250
+  orthographic size: 22.5
   m_Depth: 0
   m_CullingMask:
     serializedVersion: 2
@@ -758,7 +907,7 @@ Transform:
   m_GameObject: {fileID: 987965041}
   serializedVersion: 2
   m_LocalRotation: {x: 0.7071068, y: -0, z: -0, w: 0.7071068}
-  m_LocalPosition: {x: 2.98845, y: 10, z: -39.88542}
+  m_LocalPosition: {x: 80.6, y: 1, z: -56.5}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -844,6 +993,55 @@ Transform:
   - {fileID: 987965044}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1032869433
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1032869434}
+  - component: {fileID: 1032869435}
+  m_Layer: 0
+  m_Name: 3 - StopAndGo (48 m)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1032869434
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1032869433}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 23.801254, y: 0, z: 30}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 2115074266}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1032869435
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1032869433}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fdc582c6b1c984d7ebb46b95d9a1cb1f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.Simulation.TrackEvent
+  kind: 0
+  s: 48.38551
+  endS: 48.38551
+  waitDuration: 3
+  limitKmh: 30
 --- !u!1 &1037761336
 GameObject:
   m_ObjectHideFlags: 0
@@ -879,6 +1077,8 @@ Transform:
   - {fileID: 1531519422}
   - {fileID: 988303696}
   - {fileID: 1425785810}
+  - {fileID: 900000003}
+  - {fileID: 900000006}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1219209565
@@ -1190,8 +1390,6 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 1219209570}
-  - {fileID: 209452768}
-  - {fileID: 1892089036}
   - {fileID: 745759215}
   - {fileID: 977851524}
   m_Father: {fileID: 0}
@@ -1207,7 +1405,7 @@ GameObject:
   - component: {fileID: 1647533178}
   - component: {fileID: 1647533177}
   m_Layer: 0
-  m_Name: GSRSensorSerial (real hardware — inactive until Phase 1 wiring)
+  m_Name: "GSRSensorSerial (real hardware \u2014 inactive until Phase 1 wiring)"
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -1381,52 +1579,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Delphi.SessionPlayer
   manager: {fileID: 1745511443}
   maxVideoDrift: 0.15
---- !u!1 &1892089035
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1892089036}
-  - component: {fileID: 1892089037}
-  m_Layer: 0
-  m_Name: TrialControlsUI
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &1892089036
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1892089035}
-  serializedVersion: 2
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0.12880993, y: 0, z: -0.72010803}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 1532902269}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1892089037
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1892089035}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f7f2ec17fe95f4b10940cfac609c499d, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Delphi.Trial.TrialControlsUI
-  trial: {fileID: 500385127}
-  dashboardDisplay: 1
 --- !u!1 &1997271795
 GameObject:
   m_ObjectHideFlags: 0
@@ -1502,24 +1654,16 @@ MonoBehaviour:
     corneringSpeed: 0.5
     takeoverProbability: 0.5
     speedBelowLimit: 0.5
-    accelJerkMin: 0.3
-    accelJerkMax: 2
-    brakeJerkMin: 0.3
-    brakeJerkMax: 2.5
+    accelJerkMin: 1
+    accelJerkMax: 4
+    brakeJerkMin: 1
+    brakeJerkMax: 5
     followMin: 0.8
     followMax: 2.5
-    cornerMin: 0.6
-    cornerMax: 1.15
+    cornerSlowdownMinKmh: 5
+    cornerSlowdownMaxKmh: 30
     belowLimitMinKmh: 0
     belowLimitMaxKmh: 15
-  maxAccel: 3
-  maxDecel: 4
-  comfyLateralAccel: 2
-  cornerLookaheadMeters: 15
-  leadCarGap: -1
-  leadCarSpeedEstimate: 0
-  planningDecelFactor: 0.6
-  linearSpeedKmh: 40
   logStateChanges: 0
 --- !u!4 &2014745829
 Transform:
@@ -1536,6 +1680,220 @@ Transform:
   m_Children:
   - {fileID: 791336333}
   - {fileID: 1271093018}
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &2115074263
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2115074266}
+  - component: {fileID: 2115074265}
+  - component: {fileID: 2115074264}
+  m_Layer: 0
+  m_Name: Track
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &2115074264
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2115074263}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3172a25925d204d38b1599a57ee25677, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.Simulation.Track
+  splineContainer: {fileID: 2115074265}
+  defaultSpeedLimitKmh: 50
+  samplesPerMeter: 1
+  showDebugGizmos: 1
+  gizmoMarkerSpacingMeters: 50
+  debugLineWidth: 0.35
+--- !u!114 &2115074265
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2115074263}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dab5c7d4c32e743048dfca98e2d5914f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.Splines::UnityEngine.Splines.SplineContainer
+  m_Spline:
+    m_EditModeType: 1
+    m_Knots: []
+    m_MetaData: []
+    m_Closed: 0
+    m_IntData:
+      m_Data: []
+    m_FloatData:
+      m_Data: []
+    m_Float4Data:
+      m_Data: []
+    m_ObjectData:
+      m_Data: []
+  m_Splines:
+  - m_EditModeType: 1
+    m_Knots:
+    - Position:
+        x: 0
+        y: 0
+        z: 0
+      TangentIn:
+        x: 0
+        y: 0
+        z: 0
+      TangentOut:
+        x: 0
+        y: 0
+        z: 0
+      Rotation:
+        value:
+          x: 0
+          y: 0
+          z: 0
+          w: 1
+    - Position:
+        x: 0
+        y: 0
+        z: 10
+      TangentIn:
+        x: 0
+        y: 0
+        z: 0
+      TangentOut:
+        x: 0
+        y: 0
+        z: 0
+      Rotation:
+        value:
+          x: 0
+          y: 0
+          z: 0
+          w: 1
+    - Position:
+        x: 0
+        y: 0
+        z: 20
+      TangentIn:
+        x: -0
+        y: -0
+        z: -3.3457596
+      TangentOut:
+        x: 0
+        y: 0
+        z: 3.978801
+      Rotation:
+        value:
+          x: 0
+          y: 0.19509032
+          z: 0
+          w: 0.98078525
+    - Position:
+        x: 10
+        y: 0
+        z: 30
+      TangentIn:
+        x: -0
+        y: -0
+        z: -3.978801
+      TangentOut:
+        x: 0
+        y: 0
+        z: 3.3457596
+      Rotation:
+        value:
+          x: 0
+          y: 0.55557024
+          z: 0
+          w: 0.83146966
+    - Position:
+        x: 20
+        y: 0
+        z: 30
+      TangentIn:
+        x: -0
+        y: -0
+        z: -3.3333333
+      TangentOut:
+        x: 0
+        y: 0
+        z: 3.3333333
+      Rotation:
+        value:
+          x: 0
+          y: 0.70710677
+          z: 0
+          w: 0.70710677
+    - Position:
+        x: 30
+        y: 0
+        z: 30
+      TangentIn:
+        x: -0
+        y: -0
+        z: -1
+      TangentOut:
+        x: 0
+        y: 0
+        z: 1
+      Rotation:
+        value:
+          x: 0
+          y: 0.70710677
+          z: 0
+          w: 0.70710677
+    m_MetaData:
+    - Mode: 1
+      Tension: 0.5
+    - Mode: 1
+      Tension: 0.5
+    - Mode: 0
+      Tension: 0.5
+    - Mode: 0
+      Tension: 0.5
+    - Mode: 0
+      Tension: 0.5
+    - Mode: 0
+      Tension: 0.5
+    m_Closed: 0
+    m_IntData:
+      m_Data: []
+    m_FloatData:
+      m_Data: []
+    m_Float4Data:
+      m_Data: []
+    m_ObjectData:
+      m_Data: []
+  m_Knots:
+    m_KnotsLink: []
+--- !u!4 &2115074266
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2115074263}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 64.35121, y: 0, z: -33.70705}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 81696302}
+  - {fileID: 95379956}
+  - {fileID: 1032869434}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2145559029
@@ -1647,3 +2005,5 @@ SceneRoots:
   - {fileID: 1798600216}
   - {fileID: 500385128}
   - {fileID: 1745511444}
+  - {fileID: 900000011}
+  - {fileID: 2115074266}
