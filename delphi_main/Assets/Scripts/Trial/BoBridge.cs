@@ -56,7 +56,7 @@ namespace Delphi.Trial
                     $"Python not found at '{pythonPath}'. Create the venv " +
                     "(python3.13 -m venv BOPythonEnv && BOPythonEnv/bin/pip install -r " +
                     "Assets/StreamingAssets/BOData/Installation/requirements.txt) " +
-                    "or set the path on the TrialManager.", pythonPath);
+                    "or set the path on the SessionController.", pythonPath);
 
             string script = Path.Combine(scriptDir, scriptName);
             if (!File.Exists(script))

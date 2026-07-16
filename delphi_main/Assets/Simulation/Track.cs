@@ -75,6 +75,7 @@ namespace Delphi.Simulation
         private readonly List<TrackEvent> _stops = new();     // StopAndGo, sorted by S
         private readonly List<TrackEvent> _cruiseZones = new(); // Cruise, sorted by S
         private readonly List<TrackEvent> _turns = new();      // Turn, sorted by S
+        private readonly List<TrackEvent> _parks = new();      // Park, sorted by S
 
         /// <summary>Cruise zones (speed overrides), sorted by S — for authoring/analysis.</summary>
         public IReadOnlyList<TrackEvent> CruiseZones => _cruiseZones;
@@ -82,6 +83,8 @@ namespace Delphi.Simulation
         public IReadOnlyList<TrackEvent> Stops => _stops;
         /// <summary>Turn context markers, sorted by S.</summary>
         public IReadOnlyList<TrackEvent> Turns => _turns;
+        /// <summary>Park markers, sorted by S.</summary>
+        public IReadOnlyList<TrackEvent> Parks => _parks;
         private bool _built;
         private double _lastEditorBuildTime;
         private GameObject _debugLineRoot;
@@ -253,7 +256,7 @@ namespace Delphi.Simulation
         /// adding/moving markers at runtime (rare) — done automatically on build.</summary>
         public void RebuildEventIndex()
         {
-            _events.Clear(); _stops.Clear(); _cruiseZones.Clear(); _turns.Clear();
+            _events.Clear(); _stops.Clear(); _cruiseZones.Clear(); _turns.Clear(); _parks.Clear();
             GetComponentsInChildren(includeInactive: false, _events);
             _events.Sort((a, b) => a.S.CompareTo(b.S));
             for (int i = 0; i < _events.Count; i++)
@@ -264,6 +267,7 @@ namespace Delphi.Simulation
                     case TrackEventKind.StopAndGo: _stops.Add(ev);       break;
                     case TrackEventKind.Cruise:    _cruiseZones.Add(ev); break;
                     case TrackEventKind.Turn:      _turns.Add(ev);       break;
+                    case TrackEventKind.Park:      _parks.Add(ev);      break;
                 }
                 // Descriptive, order-and-position GameObject name — kept live
                 // by the same throttled rebuild that keeps the LUT current, so
@@ -424,6 +428,18 @@ namespace Delphi.Simulation
             }
             stopS = float.PositiveInfinity;
             ev = null;
+            return false;
+        }
+
+        /// <summary>The track's designated parking spot — the FIRST Park
+        /// marker by S if more than one exists (multi-park tracks aren't
+        /// supported yet). Unlike TryNextStop, this isn't gated by a served
+        /// set: CarDriver only consults it while actively heading to park
+        /// (see CarDriver.RequestPark), not on every frame.</summary>
+        public bool TryGetPark(out TrackEvent park)
+        {
+            if (_parks.Count > 0) { park = _parks[0]; return true; }
+            park = null;
             return false;
         }
 

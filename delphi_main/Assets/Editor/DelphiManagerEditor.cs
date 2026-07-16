@@ -44,6 +44,12 @@ namespace Delphi.EditorTools
                 new Row("EEG",            "eegOn",             "eeg"),
                 new Row("Facial affect",   "facialOn",          "facial"),
             }),
+            ("IMU / Accelerometer", "imuRateHz", new[]
+            {
+                new Row("Acc X",           "accXOn",            "accX"),
+                new Row("Acc Y",           "accYOn",            "accY"),
+                new Row("Acc Z",           "accZOn",            "accZ"),
+            }),
         };
 
         // Frame feeds each carry their own FPS field — on the MANAGER, like
@@ -62,6 +68,8 @@ namespace Delphi.EditorTools
             { "blinkRate", Channel.BlinkRate }, { "gaze", Channel.Gaze },
             { "pupilDiameter", Channel.PupilDiameter },
             { "eeg", Channel.EEG },             { "facial", Channel.Facial },
+            { "accX", Channel.AccX },           { "accY", Channel.AccY },
+            { "accZ", Channel.AccZ },
         };
 
         private static readonly Dictionary<string, FrameChannel> FrameChannelByProp = new()

@@ -5,7 +5,7 @@ namespace Delphi.Trial
 {
     /// <summary>How a per-channel deviation from baseline is shaped into the
     /// value the optimizer minimizes. Chosen ONCE for the whole trial (all
-    /// channels share it), on TrialManager.</summary>
+    /// channels share it), on SessionController.</summary>
     public enum ActivationFunction
     {
         /// <summary>Proportional both ways: clamp(d, −1, +1). The good
@@ -22,8 +22,8 @@ namespace Delphi.Trial
 
     /// <summary>
     /// Per-channel facts the trial layer needs to turn a raw physiological
-    /// mean into a BO objective. Edited in the TrialManager inspector, one row
-    /// per attached+enabled channel.
+    /// mean into a BO objective. Edited in the SessionController inspector,
+    /// one row per attached+enabled channel.
     ///
     /// NO z-scores anywhere: the bounds are baseline ± k·SD with a
     /// LITERATURE-supplied SD (NOT the noisy 30 s baseline's own spread), so

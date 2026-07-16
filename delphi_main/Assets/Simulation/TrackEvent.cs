@@ -8,13 +8,19 @@ namespace Delphi.Simulation
     /// <summary>
     /// The driving-event vocabulary, aligned to the study's context taxonomy.
     ///   StopAndGo — a stop (red light, stop sign, pedestrian crossing): brake
-    ///               to the line, wait, pull away.
+    ///               to the line, wait a fixed duration, pull away on its own.
     ///   Cruise    — a ranged zone with a max speed; steady-state driving.
     ///   Turn      — a ranged marker over a curve. The road actually curves via
     ///               the spline (cornering falls out of curvature); this just
     ///               LABELS the segment as a turn context (start→end).
+    ///   Park      — a stop LINE like StopAndGo (same approach-braking, same
+    ///               exact-stop-line guarantee), but it does NOT auto-resume.
+    ///               The car sits here until SessionController explicitly
+    ///               calls CarDriver.ResumeDriving() — used for the between-
+    ///               conditions Parking segment, where the experiment
+    ///               procedure (not a timer) decides when driving resumes.
     /// </summary>
-    public enum TrackEventKind { StopAndGo, Cruise, Turn }
+    public enum TrackEventKind { StopAndGo, Cruise, Turn, Park }
 
     /// <summary>
     /// A hand-placed marker on the Track. The researcher drags an empty
@@ -56,16 +62,20 @@ namespace Delphi.Simulation
         public float S => s;
         public float EndS => Mathf.Max(endS, s);
         /// <summary>Kinds that span a start→end range (have an EndS far edge and
-        /// an end handle): Cruise and Turn. StopAndGo is a single point.</summary>
+        /// an end handle): Cruise and Turn. StopAndGo and Park are single points.</summary>
         public bool IsRanged => kind == TrackEventKind.Cruise || kind == TrackEventKind.Turn;
-        /// <summary>Halts the car at the line.</summary>
+        /// <summary>Halts the car at the line (auto-resumes after waitDuration).</summary>
         public bool IsStop => kind == TrackEventKind.StopAndGo;
+        /// <summary>Halts the car at the line indefinitely — resumes only when
+        /// told to (see CarDriver.RequestPark/ResumeDriving).</summary>
+        public bool IsPark => kind == TrackEventKind.Park;
 
         public static Color KindColor(TrackEventKind k) => k switch
         {
             TrackEventKind.StopAndGo => new Color(0.95f, 0.15f, 0.15f), // red
             TrackEventKind.Cruise    => new Color(0.20f, 0.85f, 0.95f), // cyan
             TrackEventKind.Turn      => new Color(0.70f, 0.45f, 0.95f), // purple
+            TrackEventKind.Park      => new Color(0.25f, 0.55f, 0.95f), // blue
             _                        => Color.white
         };
 
@@ -393,6 +403,15 @@ namespace Delphi.Simulation
                     EditorGUILayout.HelpBox("The road curves via the spline itself; this just " +
                         "marks the turn's start→end for the driving-context analysis. Drag the " +
                         "spline knots to shape the actual bend.", MessageType.None);
+                    break;
+
+                case TrackEventKind.Park:
+                    EditorGUILayout.LabelField("Park (experiment-controlled stop)", EditorStyles.boldLabel);
+                    EditorGUILayout.HelpBox("Same exact-stop-line braking as StopAndGo, but it does " +
+                        "NOT auto-resume — waitDuration is ignored here. The car sits parked until " +
+                        "SessionController calls CarDriver.ResumeDriving() (wired to the Parking → " +
+                        "next Condition transition). Only the first Park marker on the track is used.",
+                        MessageType.None);
                     break;
             }
 

@@ -46,3 +46,7 @@ Thumbs.db
 # Crash reports
 sysinfo.txt
 crashlytics-build.properties
+
+# Python bytecode cache (PolarH10 script)
+__pycache__/
+*.pyc

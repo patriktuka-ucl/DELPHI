@@ -132,6 +132,15 @@ namespace Delphi.Simulation
         [Header("Parameters (normally driven by the optimiser)")]
         public DrivingParameters parameters = new DrivingParameters();
 
+        [Header("Parking")]
+        [Tooltip("Car starts parked (stationary) rather than driving off the " +
+                 "instant Play begins. SessionController calls ResumeDriving() " +
+                 "when the experiment procedure is ready for this condition's " +
+                 "drive to start, and RequestPark() to send the car back to the " +
+                 "track's Park marker (a TrackEventKind.Park) between " +
+                 "conditions. Same mechanism either way — parked is parked.")]
+        public bool startParked = true;
+
         [Header("Debug")]
         public bool logStateChanges = false;
 
@@ -140,8 +149,18 @@ namespace Delphi.Simulation
         private float _waitTimer;
         private readonly HashSet<TrackEvent> _servedLights = new();
         private bool _finished;
+        private bool _isParked;
+        private bool _headingToPark;
 
         public float CurrentSpeedKmh => Speed * 3.6f;
+        /// <summary>True whenever the car is sitting stopped and NOT counting
+        /// down toward an automatic resume — either it hasn't been told to
+        /// start yet, or it arrived at the Park marker. False while merely
+        /// waiting out a timed StopAndGo light.</summary>
+        public bool IsParked => _isParked;
+        /// <summary>True from RequestPark() until the car actually arrives at
+        /// the Park marker and IsParked becomes true.</summary>
+        public bool IsHeadingToPark => _headingToPark;
 
         private void Start()
         {
@@ -154,7 +173,51 @@ namespace Delphi.Simulation
             PlaceAt(0f, 0f);
             _servedLights.Clear();
             _finished = false;
+            _isParked = startParked;
+            _headingToPark = false;
             LogTightestCurve();
+        }
+
+        /// <summary>Experiment procedure: let the car start/resume driving —
+        /// used both for the very first drive and for leaving a Park stop.
+        /// No-op if it's already driving.</summary>
+        public void ResumeDriving()
+        {
+            if (!_isParked) return;
+            _isParked = false;
+            _headingToPark = false;
+            if (logStateChanges) Debug.Log("[CarDriver] Resuming driving.");
+        }
+
+        /// <summary>Experiment procedure: send the car to the track's Park
+        /// marker — it keeps driving (braking smoothly on approach, honouring
+        /// any red light in between) until it reaches that exact line, then
+        /// holds there until ResumeDriving() is called. No-op if already
+        /// parked/heading there, and warns once if the track has no Park
+        /// marker (nothing to head to).</summary>
+        public void RequestPark()
+        {
+            if (_isParked || _headingToPark) return;
+            if (!track.TryGetPark(out _))
+            {
+                Debug.LogWarning("[CarDriver] RequestPark() called but the Track has no Park " +
+                                  "marker (TrackEventKind.Park) — the car will keep driving normally.");
+                return;
+            }
+            _headingToPark = true;
+            if (logStateChanges) Debug.Log("[CarDriver] Heading to park.");
+        }
+
+        /// <summary>Immediate halt wherever the car currently is — no travel
+        /// to the Park marker, no approach braking curve. For emergencies:
+        /// SessionController.EmergencyStop calls this directly.</summary>
+        public void EmergencyHalt()
+        {
+            _waitingAtRedLight = false;
+            _headingToPark = false;
+            _isParked = true;
+            HoldStopped();
+            if (logStateChanges) Debug.Log($"[CarDriver] Emergency halt at s={S:F0}m.");
         }
 
         // A "Turn" TrackEvent is only a LABEL — it has zero effect on physics.
@@ -183,6 +246,15 @@ namespace Delphi.Simulation
             if (!track.IsReady || _finished) return;
             float dt = Time.deltaTime;
 
+            // ── Parked — not driving at all until ResumeDriving() ────
+            // Covers BOTH the initial startParked state and having arrived
+            // at the Park marker; either way there's nothing to compute.
+            if (_isParked)
+            {
+                HoldStopped();
+                return;
+            }
+
             // ── Holding at a red light ───────────────────────────────
             if (_waitingAtRedLight)
             {
@@ -206,7 +278,8 @@ namespace Delphi.Simulation
             // frame's motion would carry the car past it, the car lands ON
             // it instead and the wait starts — that's what makes the stop
             // position exact regardless of speed, frame rate, or how gentle
-            // the braking parameters are.
+            // the braking parameters are. A red light always takes priority
+            // over the park destination if it happens to sit closer.
             float newS = S + Speed * dt;
             if (track.TryNextStop(_servedLights, out float stopS, out TrackEvent light)
                 && newS >= stopS)
@@ -221,6 +294,21 @@ namespace Delphi.Simulation
                 PlaceOnRoute(dt);
                 return;
             }
+
+            // ── Arriving at the requested Park marker ────────────────
+            // Same exact-line landing as a red light, but this one holds
+            // indefinitely (IsParked) instead of counting down a timer.
+            if (_headingToPark && track.TryGetPark(out TrackEvent park) && newS >= park.S)
+            {
+                S = park.S;
+                _isParked = true;
+                _headingToPark = false;
+                HoldStopped();
+                if (logStateChanges) Debug.Log($"[CarDriver] Parked (s={park.S:F0}m).");
+                PlaceOnRoute(dt);
+                return;
+            }
+
             S = newS;
 
             // ── End of the track ─────────────────────────────────────
@@ -268,6 +356,15 @@ namespace Delphi.Simulation
             if (track.TryNextStop(_servedLights, out float stopS, out _))
             {
                 float distanceRemaining = Mathf.Max(0f, stopS - S);
+                float approachLimit = Mathf.Sqrt(2f * parameters.BrakeJerk * distanceRemaining);
+                target = Mathf.Min(target, approachLimit);
+            }
+
+            // Same anticipatory braking curve, aimed at the Park marker
+            // instead — only active once RequestPark() has been called.
+            if (_headingToPark && track.TryGetPark(out TrackEvent park))
+            {
+                float distanceRemaining = Mathf.Max(0f, park.S - S);
                 float approachLimit = Mathf.Sqrt(2f * parameters.BrakeJerk * distanceRemaining);
                 target = Mathf.Min(target, approachLimit);
             }

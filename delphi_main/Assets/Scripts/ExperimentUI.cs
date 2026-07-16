@@ -4,7 +4,6 @@ using System.IO;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.InputSystem;
-using Delphi.Trial;
 using Delphi.Session;
 using Delphi.Simulation;
 
@@ -38,7 +37,6 @@ namespace Delphi
         [Header("Links (all auto-found if empty)")]
         public DelphiManager manager;
         public SessionController session;
-        public TrialManager trial;
         public SessionRecorder recorder;
         public SessionPlayer player;
 
@@ -85,7 +83,6 @@ namespace Delphi
         {
             if (manager == null)  manager  = FindFirstObjectByType<DelphiManager>();
             if (session == null)  session  = FindFirstObjectByType<SessionController>();
-            if (trial == null)    trial    = FindFirstObjectByType<TrialManager>();
             if (recorder == null) recorder = FindFirstObjectByType<SessionRecorder>();
             if (player == null)   player   = FindFirstObjectByType<SessionPlayer>();
             if (manager == null) { Debug.LogError("[ExperimentUI] No DelphiManager."); enabled = false; return; }
@@ -120,12 +117,13 @@ namespace Delphi
         private GameObject _preGroup, _liveGroup;
         private Image _firstImplImg, _firstExplImg, _freePlayImg, _startImg;
         private Text _freePlayTxt;
+        private InputField _userIdField, _groupIdField;
         private Text _phaseTxt, _statusTxt, _headerStatus;
         private Text[] _condLabel = new Text[2];
         private Text[] _condTime  = new Text[2];
         private Slider _condBar;
         private Button _qDoneBtn, _breakBtn, _continueBtn, _resumeBreakBtn,
-                       _endFreePlayBtn, _endInterviewBtn, _estopBtn, _estopResumeBtn;
+                       _endFreePlayBtn, _estopBtn, _estopResumeBtn;
         private Text _estopBanner;
 
         private void RefreshSessionCard()
@@ -133,7 +131,7 @@ namespace Delphi
             if (session == null) return;
             var phase = session.CurrentPhase;
             bool idle = session.CanStart;
-            bool stopped = phase == SessionController.Phase.EmergencyStop;
+            bool stopped = phase == SessionController.Phase.EmergencyStop || phase == SessionController.Phase.Error;
             bool active = !idle && !stopped;
 
             _preGroup.SetActive(idle);
@@ -158,14 +156,13 @@ namespace Delphi
                 double pr = session.PhaseSecondsRemaining;
                 _statusTxt.text = session.StatusLine + (pr > 0 ? $"   {Mmss((float)pr)} left" : "");
 
-                float est = session.EstimatedConditionSeconds();
                 int activeSlot = session.ActiveConditionSlot;
                 for (int s = 0; s < 2; s++)
                 {
                     _condLabel[s].text = $"Cond {s + 1}: {session.ConditionKindAt(s)}";
-                    bool isActive = s == activeSlot && phase == SessionController.Phase.Condition;
+                    bool isActive = s == activeSlot && session.IsRunningCondition;
                     bool isDone = session.ConditionNumber > s + 1 ||
-                                  (session.ConditionNumber == s + 1 && phase != SessionController.Phase.Condition);
+                                  (session.ConditionNumber == s + 1 && !session.IsRunningCondition);
                     if (isActive)
                     {
                         _condLabel[s].color = _condTime[s].color = _running;
@@ -179,7 +176,7 @@ namespace Delphi
                     else
                     {
                         _condLabel[s].color = _condTime[s].color = _pending;
-                        _condTime[s].text = $"pending · ~{Mmss(est)}";
+                        _condTime[s].text = $"pending · ~{Mmss(session.EstimatedConditionSeconds(session.ConditionKindAt(s)))}";
                     }
                 }
                 _condBar.value = session.CurrentConditionProgress();
@@ -190,14 +187,15 @@ namespace Delphi
             Show(_continueBtn, phase == SessionController.Phase.BreakOffer && !session.AwaitingBreakResume);
             Show(_resumeBreakBtn, phase == SessionController.Phase.BreakOffer && session.AwaitingBreakResume);
             Show(_endFreePlayBtn, phase == SessionController.Phase.FreePlay);
-            Show(_endInterviewBtn, phase == SessionController.Phase.Interview);
             Show(_estopBtn, active);
             Show(_estopResumeBtn, stopped);
             _estopBanner.gameObject.SetActive(stopped);
         }
 
         // ════════════════════════════════════════════════════════════════
-        //  TRIAL READOUT (read-only — the session starts it)
+        //  TRIAL READOUT (read-only, always — the researcher only WATCHES
+        //  these values; during Phase.FreePlay the participant controls them
+        //  on their own world-space panel, see FreePlayPanel.cs)
         // ════════════════════════════════════════════════════════════════
         private Image _optDot;
         private Text _optLabel, _iterTxt, _hvTxt;
@@ -208,24 +206,24 @@ namespace Delphi
 
         private void RefreshTrialCard()
         {
-            if (trial == null) return;
-            var (c, l) = trial.Optimizer switch
+            if (session == null) return;
+            var (c, l) = session.Optimizer switch
             {
-                TrialManager.OptimizerStatus.Connected    => (_accent, "optimizer: connected"),
-                TrialManager.OptimizerStatus.Starting      => (new Color(0.85f,0.75f,0.25f), "optimizer: starting…"),
-                TrialManager.OptimizerStatus.Disconnected  => (_estop, "optimizer: disconnected"),
-                _                                          => (_pending, "optimizer: idle")
+                SessionController.OptimizerStatus.Connected    => (_accent, "optimizer: connected"),
+                SessionController.OptimizerStatus.Starting      => (new Color(0.85f,0.75f,0.25f), "optimizer: starting…"),
+                SessionController.OptimizerStatus.Disconnected  => (_estop, "optimizer: disconnected"),
+                _                                                => (_pending, "optimizer: idle")
             };
             _optDot.color = c; _optLabel.text = l; _optLabel.color = c;
 
-            bool running = trial.State != TrialManager.TrialState.Idle;
-            _iterTxt.text = running ? $"iteration {trial.Iteration} / {trial.TotalIterations}" : "iteration — / —";
-            _hvTxt.text = float.IsNaN(trial.LastCoverage) ? "hypervolume  —" : $"hypervolume  {trial.LastCoverage:F3}";
-            _hvTxt.color = float.IsNaN(trial.LastCoverage) ? _dim : _accent;
+            bool running = session.IsRunningCondition;
+            _iterTxt.text = running ? $"iteration {session.Iteration} / {session.TotalIterations}" : "iteration — / —";
+            _hvTxt.text = float.IsNaN(session.LastCoverage) ? "hypervolume  —" : $"hypervolume  {session.LastCoverage:F3}";
+            _hvTxt.color = float.IsNaN(session.LastCoverage) ? _dim : _accent;
 
-            if (trial.carDriver != null)
+            if (session.carDriver != null)
             {
-                var p = trial.carDriver.parameters;
+                var p = session.carDriver.parameters;
                 float[] v = { p.accelerationJerk, p.brakingJerk, p.followDistance,
                               p.corneringSpeed, p.takeoverProbability, p.speedBelowLimit };
                 for (int i = 0; i < 6; i++)
@@ -272,8 +270,8 @@ namespace Delphi
         {
             bool has = manager.HasData(p.channel);
             float val = manager.GetValue(p.channel);
-            p.hasBounds = !manager.IsInPlayback && trial != null &&
-                          trial.TryGetBounds(p.channel, out p.lower, out p.upper);
+            p.hasBounds = !manager.IsInPlayback && session != null &&
+                          session.TryGetBounds(p.channel, out p.lower, out p.upper);
             bool clipped = p.hasBounds && has && (val < p.lower || val > p.upper);
 
             if (manager.IsInPlayback) manager.Playback.FillHistory(p.channel, p.history, HistoryWindow);
@@ -442,12 +440,12 @@ namespace Delphi
             {
                 _lastPhase = session.CurrentPhase;
                 Log($"→ {session.CurrentPhase}" +
-                    (session.CurrentPhase == SessionController.Phase.Condition ? $" ({session.CurrentConditionKind})" : ""));
+                    (session.IsRunningCondition ? $" ({session.CurrentConditionKind})" : ""));
             }
-            if (trial != null && trial.Iteration != _lastIter)
+            if (session != null && session.Iteration != _lastIter)
             {
-                _lastIter = trial.Iteration;
-                if (_lastIter > 0) Log($"   iteration {_lastIter}/{trial.TotalIterations} applied");
+                _lastIter = session.Iteration;
+                if (_lastIter > 0) Log($"   iteration {_lastIter}/{session.TotalIterations} applied");
             }
         }
 
@@ -502,9 +500,22 @@ namespace Delphi
                 () => session.firstCondition = SessionController.ConditionKind.Implicit, out _);
             _firstExplImg = Btn(_preGroup.transform, "Explicit", new Vector2(298, -32), new Vector2(140, 26),
                 () => session.firstCondition = SessionController.ConditionKind.Explicit, out _);
-            _freePlayImg = Btn(_preGroup.transform, "Free-play: ON", new Vector2(16, -70), new Vector2(220, 26),
+
+            // Participant/group identifiers — set per session here, not in the
+            // Inspector (up to ~30 participants; a fixed Inspector value would
+            // mean re-editing the prefab/scene between every run).
+            Txt(_preGroup.transform, "Participant ID", 13, _dim, new Vector2(16, -70), new Vector2(110, 20));
+            _userIdField = Field(_preGroup.transform, new Vector2(132, -68), new Vector2(140, 26), "P01");
+            _userIdField.text = session.userId;
+            _userIdField.onValueChanged.AddListener(v => session.userId = v);
+            Txt(_preGroup.transform, "Group", 13, _dim, new Vector2(282, -70), new Vector2(46, 20));
+            _groupIdField = Field(_preGroup.transform, new Vector2(332, -68), new Vector2(90, 26), "0");
+            _groupIdField.text = session.groupId;
+            _groupIdField.onValueChanged.AddListener(v => session.groupId = v);
+
+            _freePlayImg = Btn(_preGroup.transform, "Free-play: ON", new Vector2(16, -108), new Vector2(220, 26),
                 () => session.includeFreePlay = !session.includeFreePlay, out _freePlayTxt);
-            _startImg = Btn(_preGroup.transform, "START SESSION", new Vector2(16, -110), new Vector2(422, 48),
+            _startImg = Btn(_preGroup.transform, "START SESSION", new Vector2(16, -148), new Vector2(422, 48),
                 () => session.StartSession(), out _);
             _startImg.color = _btnSel;
 
@@ -527,7 +538,6 @@ namespace Delphi
             _continueBtn = BtnObj(host, "CONTINUE", new Vector2(233, -178), new Vector2(205, 38), () => session.ChooseContinue());
             _resumeBreakBtn = BtnObj(host, "RESUME NEXT CONDITION", pos, wide, () => session.ResumeFromBreak());
             _endFreePlayBtn = BtnObj(host, "END FREE-PLAY", pos, wide, () => session.EndFreePlay());
-            _endInterviewBtn = BtnObj(host, "END INTERVIEW", pos, wide, () => session.EndInterview());
 
             var estopImg = Btn(host, "EMERGENCY STOP", new Vector2(16, -240), new Vector2(422, 46), () => session.EmergencyStop(), out _);
             _estopBtn = estopImg.GetComponent<Button>(); estopImg.color = _estop;
@@ -700,7 +710,7 @@ namespace Delphi
             s.navigation = new Navigation { mode = Navigation.Mode.None }; return s;
         }
 
-        private Slider Scrub(Transform parent, Vector2 pos, Vector2 size)
+        private Slider Scrub(Transform parent, Vector2 pos, Vector2 size, Color? fillColor = null)
         {
             var go = new GameObject("Scrubber", typeof(RectTransform), typeof(Slider)); go.transform.SetParent(parent, false);
             var rt = go.GetComponent<RectTransform>(); rt.anchorMin = new Vector2(0, 1); rt.anchorMax = new Vector2(1, 1); rt.pivot = new Vector2(0, 1);
@@ -709,7 +719,7 @@ namespace Delphi
             var bgrt = bg.GetComponent<RectTransform>(); bgrt.anchorMin = new Vector2(0, 0.35f); bgrt.anchorMax = new Vector2(1, 0.65f); bgrt.offsetMin = bgrt.offsetMax = Vector2.zero;
             var fa = new GameObject("Fill Area", typeof(RectTransform)); fa.transform.SetParent(go.transform, false);
             var fart = fa.GetComponent<RectTransform>(); fart.anchorMin = new Vector2(0, 0.35f); fart.anchorMax = new Vector2(1, 0.65f); fart.offsetMin = fart.offsetMax = Vector2.zero;
-            var fill = new GameObject("Fill", typeof(Image)); fill.transform.SetParent(fa.transform, false); fill.GetComponent<Image>().color = _accent;
+            var fill = new GameObject("Fill", typeof(Image)); fill.transform.SetParent(fa.transform, false); fill.GetComponent<Image>().color = fillColor ?? _accent;
             var frt = fill.GetComponent<RectTransform>(); frt.anchorMin = Vector2.zero; frt.anchorMax = Vector2.one; frt.offsetMin = frt.offsetMax = Vector2.zero;
             var ha = new GameObject("Handle Area", typeof(RectTransform)); ha.transform.SetParent(go.transform, false);
             var hart = ha.GetComponent<RectTransform>(); hart.anchorMin = Vector2.zero; hart.anchorMax = Vector2.one; hart.offsetMin = new Vector2(8, 0); hart.offsetMax = new Vector2(-8, 0);

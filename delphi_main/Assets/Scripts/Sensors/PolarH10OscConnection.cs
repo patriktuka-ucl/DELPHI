@@ -41,6 +41,19 @@ namespace Delphi
         [Tooltip("Number of most recent RR-intervals used for RMSSD")]
         [SerializeField] private int rrHistorySize = 12;
 
+        public enum AccAxis { X, Y, Z }
+
+        [Header("Accelerometer")]
+        [SerializeField] private string accXAddress = "/PolarH10/AccX";
+        [SerializeField] private string accYAddress = "/PolarH10/AccY";
+        [SerializeField] private string accZAddress = "/PolarH10/AccZ";
+        [Tooltip("On: only the axis below is exposed through PolarH10ChannelReader (the other two read NaN/NoSignal). Off: all 3 axes are exposed. Which physical axis is actually front/back depends on how the strap sits on the chest — verify against Polar's own axis diagram rather than assuming, then set it below.")]
+        [SerializeField] private bool lockToFrontBackAxis = false;
+        [SerializeField] private AccAxis frontBackAxis = AccAxis.Z;
+
+        public bool LockToFrontBackAxis => lockToFrontBackAxis;
+        public AccAxis FrontBackAxis => frontBackAxis;
+
         [Header("Python Bridge")]
         [Tooltip("Launch PolarH10/polar_h10_stream.py automatically on Play and stop it when Play ends. Disable to run it yourself in a terminal instead.")]
         [SerializeField] private bool autoStartPythonScript = true;
@@ -57,6 +70,9 @@ namespace Delphi
 
         private float _latestRmssdMs;
         private bool _hasRmssd;
+
+        private float _latestAccXmG, _latestAccYmG, _latestAccZmG;
+        private bool _hasAcc;
 
         // Touched only from the listener thread.
         private readonly List<float> _rrHistoryMs = new List<float>();
@@ -266,6 +282,18 @@ namespace Delphi
                 if (logParseErrors)
                     Debug.Log($"[PolarH10OscConnection] RR {firstFloat} ms");
             }
+            else if (address == accXAddress)
+            {
+                lock (_lock) { _latestAccXmG = firstFloat; _hasAcc = true; }
+            }
+            else if (address == accYAddress)
+            {
+                lock (_lock) { _latestAccYmG = firstFloat; _hasAcc = true; }
+            }
+            else if (address == accZAddress)
+            {
+                lock (_lock) { _latestAccZmG = firstFloat; _hasAcc = true; }
+            }
             else if (logParseErrors)
             {
                 Debug.LogWarning($"[PolarH10OscConnection] Unrecognized OSC address '{address}' (expected '{hrAddress}' or '{rrAddress}').");
@@ -324,6 +352,9 @@ namespace Delphi
 
         public float GetHeartRateBpm() { lock (_lock) { return _hasHr ? _latestHrBpm : float.NaN; } }
         public float GetHrvRmssdMs() { lock (_lock) { return _hasRmssd ? _latestRmssdMs : float.NaN; } }
+        public float GetAccXmG() { lock (_lock) { return _hasAcc ? _latestAccXmG : float.NaN; } }
+        public float GetAccYmG() { lock (_lock) { return _hasAcc ? _latestAccYmG : float.NaN; } }
+        public float GetAccZmG() { lock (_lock) { return _hasAcc ? _latestAccZmG : float.NaN; } }
 
         private void OnDestroy()
         {

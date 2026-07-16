@@ -1,0 +1,6 @@
+UserID;ConditionID;GroupID;Timestamp;Iteration;Phase;IsPareto;q1_1;q2_2;q3_3;accelerationJerk;brakingJerk;followDistance;corneringSpeed;takeoverProbability;speedBelowLimit
+P0;explicit;0;2026-07-16 13:51:22;1;sampling;FALSE;0.5;0.7;0.6;0.068;0.225;0.699;0.063;0.375;0.03
+P0;explicit;0;2026-07-16 13:51:53;2;sampling;FALSE;0.7;0.7;0.5;0.147;0.339;0.27;0.273;0.69;0.389
+P0;explicit;0;2026-07-16 13:52:08;3;sampling;TRUE;0.6;0.3;0.6;0.786;0.644;0.202;0.634;0.055;0.005
+P0;explicit;0;2026-07-16 13:52:22;4;optimization;TRUE;0.5;0.7;0.3;0.871;0.591;0.765;0.472;0.293;0.088
+P0;explicit;0;2026-07-16 13:52:45;5;optimization;FALSE;0.7;0.7;0.3;0.905;0.609;0.591;0.511;0.0;0.0

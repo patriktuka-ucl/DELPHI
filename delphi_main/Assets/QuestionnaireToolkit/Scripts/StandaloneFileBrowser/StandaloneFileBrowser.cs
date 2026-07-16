@@ -15,14 +15,25 @@ namespace QuestionnaireToolkit.Scripts.StandaloneFileBrowser {
         private static IStandaloneFileBrowser _platformWrapper = null;
 
         static StandaloneFileBrowser() {
-#if UNITY_STANDALONE_OSX
+            // UNITY_EDITOR checked FIRST, not last: UNITY_STANDALONE_OSX (etc.)
+            // is ALSO defined inside the Editor whenever the active build
+            // target is that standalone platform, so the old #elif ordering
+            // picked the native macOS plugin wrapper even in-Editor. That
+            // native .bundle is x86_64-only and can't load into an arm64
+            // (Apple Silicon) Editor process — the dialog silently failed to
+            // open. The Editor wrapper below uses managed
+            // UnityEditor.EditorUtility.OpenFilePanel instead, no native
+            // plugin involved, so it works regardless of CPU architecture.
+            // Real standalone BUILDS never define UNITY_EDITOR, so they still
+            // correctly fall through to the native per-platform wrappers.
+#if UNITY_EDITOR
+            _platformWrapper = new StandaloneFileBrowserEditor();
+#elif UNITY_STANDALONE_OSX
             _platformWrapper = new StandaloneFileBrowserMac();
 #elif UNITY_STANDALONE_WIN
             _platformWrapper = new StandaloneFileBrowserWindows();
 #elif UNITY_STANDALONE_LINUX
             _platformWrapper = new StandaloneFileBrowserLinux();
-#elif UNITY_EDITOR
-            _platformWrapper = new StandaloneFileBrowserEditor();
 #endif
         }
 

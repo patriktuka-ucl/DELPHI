@@ -6,11 +6,27 @@ from pythonosc.udp_client import SimpleUDPClient
 DEVICE_NAME_PREFIX = "Polar H10"
 HEART_RATE_MEASUREMENT_UUID = "00002a37-0000-1000-8000-00805f9b34fb"
 
-# Must match PolarH10OscConnection's listenPort/hrAddress/rrAddress in Unity.
+# Polar's proprietary PMD (Polar Measurement Data) service — not part of the
+# standard BLE Heart Rate profile, needed for raw accelerometer (and ECG)
+# access. UUIDs and frame format confirmed against Polar's own PMD spec and
+# the bleakheart reference implementation, not guessed.
+PMD_CONTROL_UUID = "fb005c81-02e7-f387-1cad-8acd2d8df0c8"
+PMD_DATA_UUID = "fb005c82-02e7-f387-1cad-8acd2d8df0c8"
+
+# Start-ACC-stream command: [start_op=0x02, type=ACC(0x02),
+#   (SAMPLE_RATE, len=1, 200Hz LE16), (RESOLUTION, len=1, 16-bit LE16),
+#   (RANGE, len=1, 2G LE16)] — 200Hz/16-bit/2G is bleakheart's tested
+# default; H10 also supports 4G/8G range and 25/50/100Hz if 2G ever clips.
+ACC_START_COMMAND = bytearray([0x02, 0x02, 0x00, 0x01, 0xC8, 0x00, 0x01, 0x01, 0x10, 0x00, 0x02, 0x01, 0x02, 0x00])
+
+# Must match PolarH10OscConnection's listenPort/addresses in Unity.
 OSC_HOST = "127.0.0.1"
 OSC_PORT = 9500
 OSC_HR_ADDRESS = "/PolarH10/HR"
 OSC_RR_ADDRESS = "/PolarH10/RR"
+OSC_ACC_X_ADDRESS = "/PolarH10/AccX"
+OSC_ACC_Y_ADDRESS = "/PolarH10/AccY"
+OSC_ACC_Z_ADDRESS = "/PolarH10/AccZ"
 
 
 def parse_hr_measurement(data: bytearray) -> tuple[int, list[float]]:
@@ -50,6 +66,31 @@ def on_hr_notification(osc_client: SimpleUDPClient, _, data: bytearray) -> None:
         osc_client.send_message(OSC_RR_ADDRESS, float(rr_ms))
 
 
+def parse_acc_frame(data: bytearray) -> list[tuple[int, int, int]]:
+    # PMD frame layout: byte 0 = measurement type, bytes 1-8 = 64-bit
+    # timestamp (unused here), byte 9 = frame type. 0x01 is the plain
+    # (uncompressed) frame Polar sends at these settings; other frame types
+    # (e.g. delta-compressed) aren't handled here.
+    frame_type = data[9]
+    if frame_type != 0x01:
+        return []
+
+    samples = []
+    for offset in range(10, len(data) - 5, 6):
+        x_mg = int.from_bytes(data[offset : offset + 2], "little", signed=True)
+        y_mg = int.from_bytes(data[offset + 2 : offset + 4], "little", signed=True)
+        z_mg = int.from_bytes(data[offset + 4 : offset + 6], "little", signed=True)
+        samples.append((x_mg, y_mg, z_mg))
+    return samples
+
+
+def on_acc_notification(osc_client: SimpleUDPClient, _, data: bytearray) -> None:
+    for x_mg, y_mg, z_mg in parse_acc_frame(data):
+        osc_client.send_message(OSC_ACC_X_ADDRESS, float(x_mg))
+        osc_client.send_message(OSC_ACC_Y_ADDRESS, float(y_mg))
+        osc_client.send_message(OSC_ACC_Z_ADDRESS, float(z_mg))
+
+
 async def main() -> None:
     osc_client = SimpleUDPClient(OSC_HOST, OSC_PORT)
 
@@ -68,6 +109,17 @@ async def main() -> None:
             HEART_RATE_MEASUREMENT_UUID,
             lambda sender, data: on_hr_notification(osc_client, sender, data),
         )
+
+        try:
+            await client.write_gatt_char(PMD_CONTROL_UUID, ACC_START_COMMAND, response=True)
+            await client.start_notify(
+                PMD_DATA_UUID,
+                lambda sender, data: on_acc_notification(osc_client, sender, data),
+            )
+            print("Accelerometer stream started (200Hz, 16-bit, 2G).")
+        except Exception as e:
+            print(f"Could not start accelerometer stream (HR still works): {e}")
+
         print(f"Streaming to Unity at {OSC_HOST}:{OSC_PORT} — Ctrl+C to stop.\n")
         try:
             while True:

@@ -16,7 +16,10 @@ namespace Delphi
         Gaze,
         PupilDiameter,
         EEG,
-        Facial
+        Facial,
+        AccX,           // raw Polar H10 PMD accelerometer, milli-g
+        AccY,           // raw Polar H10 PMD accelerometer, milli-g
+        AccZ            // raw Polar H10 PMD accelerometer, milli-g
     }
 
     /// <summary>
@@ -85,6 +88,24 @@ namespace Delphi
         [SerializeField] private bool facialOn = true;
         [SerializeField] private ScalarSensor facial;
 
+        [Header("IMU / Accelerometer")]
+        [Tooltip("Sample rate for this group, Hz. Kept separate from " +
+                 "Experimental on purpose: the Polar H10's accelerometer " +
+                 "delivers real samples at 200Hz, and sharing a rate with " +
+                 "EEG/Facial would either starve this of fidelity or force " +
+                 "those onto a rate they don't need. This is the RECORDING " +
+                 "rate — the dashboard redraws slower on its own separate " +
+                 "throttle (ExperimentUI's Redraw Fps) without dropping any " +
+                 "samples from what actually gets written to disk.")]
+        [Range(1f, 240f)]
+        public float imuRateHz = 200f;
+        [SerializeField] private bool accXOn = true;
+        [SerializeField] private ScalarSensor accX;
+        [SerializeField] private bool accYOn = true;
+        [SerializeField] private ScalarSensor accY;
+        [SerializeField] private bool accZOn = true;
+        [SerializeField] private ScalarSensor accZ;
+
         [Header("Video / frame inputs")]
         [Tooltip("Per-feed capture FPS. ALL rates in DELPHI live here on the " +
                  "manager — sensors have no clocks of their own, they capture " +
@@ -120,13 +141,15 @@ namespace Delphi
             { Channel.BlinkRate, Channel.Gaze, Channel.PupilDiameter };
         private static readonly Channel[] ExperimentalChannels =
             { Channel.EEG, Channel.Facial };
+        private static readonly Channel[] ImuChannels =
+            { Channel.AccX, Channel.AccY, Channel.AccZ };
 
         // Canonical display order for the dashboard.
         public static readonly Channel[] AllChannels =
         {
             Channel.HeartRate, Channel.RMSSD, Channel.RespRate, Channel.GSR,
             Channel.BlinkRate, Channel.Gaze, Channel.PupilDiameter,
-            Channel.EEG, Channel.Facial
+            Channel.EEG, Channel.Facial, Channel.AccX, Channel.AccY, Channel.AccZ
         };
 
         public static readonly FrameChannel[] AllFrameChannels =
@@ -179,6 +202,9 @@ namespace Delphi
             Channel.PupilDiameter => ("Pupil diameter",        "mm"),
             Channel.EEG           => ("EEG",                   "µV"),
             Channel.Facial        => ("Facial affect",         ""),
+            Channel.AccX          => ("Acc X",                 "mG"),
+            Channel.AccY          => ("Acc Y",                 "mG"),
+            Channel.AccZ          => ("Acc Z",                 "mG"),
             _                     => (ch.ToString(),           "")
         };
 
@@ -225,6 +251,7 @@ namespace Delphi
                 new DelphiCore.Group { channels = GoldStandardChannels,  rateHz = goldStandardRateHz },
                 new DelphiCore.Group { channels = GoodAdditionsChannels, rateHz = goodAdditionsRateHz },
                 new DelphiCore.Group { channels = ExperimentalChannels,  rateHz = experimentalRateHz },
+                new DelphiCore.Group { channels = ImuChannels,           rateHz = imuRateHz },
             };
             _core = new DelphiCore(_coreGroups, AllChannels, Slot, IsOn);
             _core.Start();
@@ -260,13 +287,14 @@ namespace Delphi
                 _coreGroups[0].rateHz = goldStandardRateHz;
                 _coreGroups[1].rateHz = goodAdditionsRateHz;
                 _coreGroups[2].rateHz = experimentalRateHz;
+                _coreGroups[3].rateHz = imuRateHz;
             }
         }
 
         /// <summary>Fastest configured scalar rate — the csv row rate.</summary>
         public float MaxScalarRateHz =>
             Mathf.Max(1f, Mathf.Max(goldStandardRateHz,
-                      Mathf.Max(goodAdditionsRateHz, experimentalRateHz)));
+                      Mathf.Max(goodAdditionsRateHz, Mathf.Max(experimentalRateHz, imuRateHz))));
 
         /// <summary>The commanded capture rate for a frame feed — the ONLY
         /// place video rates are configured. The recorder encodes each mp4
@@ -291,6 +319,9 @@ namespace Delphi
             Channel.PupilDiameter => pupilDiameter,
             Channel.EEG           => eeg,
             Channel.Facial        => facial,
+            Channel.AccX          => accX,
+            Channel.AccY          => accY,
+            Channel.AccZ          => accZ,
             _                     => null
         };
 
@@ -305,6 +336,9 @@ namespace Delphi
             Channel.PupilDiameter => pupilDiameterOn,
             Channel.EEG           => eegOn,
             Channel.Facial        => facialOn,
+            Channel.AccX          => accXOn,
+            Channel.AccY          => accYOn,
+            Channel.AccZ          => accZOn,
             _                     => true
         };
 

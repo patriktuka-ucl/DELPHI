@@ -1,123 +1,286 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
 using System.Text;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
+using Delphi.Simulation;
 using Delphi.Trial;
+using QuestionnaireToolkit.Scripts;
 
 namespace Delphi.Session
 {
     /// <summary>
-    /// Orchestrates a whole participant session as one linear walk through an
-    /// ordered SEGMENT list, all inside a single scene (no scene loads — those
-    /// would tear down sensors, the recorder and the optimizer mid-session).
+    /// Orchestrates the WHOLE participant session — session-level pacing
+    /// (Intro/Meditation/Parking/BreakOffer/FreePlay) AND each
+    /// condition's optimization trial (baseline → iteration loop → BO
+    /// communication → objective submission). These used to be two separate
+    /// classes (SessionController + TrialManager) doing the same job — one
+    /// linear "what happens when" state machine — with real duplication.
+    /// Merged into one so there's a single source of truth. BoBridge stays
+    /// separate: its ONLY job is the socket/process plumbing to mobo.py —
+    /// this class decides WHEN to talk to it and what to send.
     ///
-    /// The list is built once at <see cref="StartSession"/> from the
-    /// counterbalanced condition order + the free-play toggle, so changing the
-    /// study structure changes the LIST, not the control flow:
+    /// mobo.py is a ONE-RUN-PER-PROCESS script — it accepts a single
+    /// connection, runs exactly one condition's optimization, then exits.
+    /// So "keep the optimizer available" means: launch it the moment Play
+    /// starts (see Awake/PrewarmOptimizer), and immediately launch the NEXT
+    /// one the instant a condition finishes — never leave a gap where no
+    /// process is booting/connected. It is never torn down by a pause
+    /// (EmergencyStop no longer aborts the trial — see EmergencyStop/Resume).
     ///
-    ///   Intro → Meditation → Habituation
-    ///         → Condition[0] → Parking → Questionnaire → BreakOffer
-    ///         → Condition[1] → Parking → Questionnaire
-    ///         → [FreePlay] → Interview → Complete
+    /// The plan is one linear SEGMENT list built once at StartSession from the
+    /// counterbalanced condition order + the free-play toggle:
     ///
-    /// Segment kinds:
-    ///   • Timed     — auto-advances after a DelphiClock duration (Intro,
-    ///                 Meditation, Habituation, Parking).
-    ///   • Gated     — waits for a researcher button call (Questionnaire,
-    ///                 BreakOffer, FreePlay, Interview).
-    ///   • Condition — delegates to TrialManager and advances when the trial
-    ///                 reaches Finished/Error. The trial's OWN Baseline state is
-    ///                 the baseline capture — one source of truth for the
-    ///                 optimization; this class only sequences around it.
+    ///   Intro → Meditation
+    ///         → Condition[0] (intro → baseline → iterations) → Parking → Questionnaire → BreakOffer
+    ///         → Condition[1] (intro → baseline → iterations) → Parking → Questionnaire
+    ///         → [BreakOffer → FreePlay → Questionnaire] → Complete
     ///
-    /// Emergency stop is orthogonal: it can interrupt any active segment, aborts
-    /// a running trial, and parks the machine in <see cref="Phase.EmergencyStop"/>
-    /// until Resume(). The physical YAW-return + passthrough belongs to the VR
-    /// layer (Phase 2) and hooks in via <see cref="onEmergencyStop"/>.
+    /// The closing interview happens IN PERSON, after the headset/screen
+    /// experience ends — there is deliberately no in-app Interview phase.
     ///
-    /// Backbone caveats (intentional, this brick): both conditions currently run
-    /// the same physiology-objective TrialManager — Implicit is complete, the
-    /// Explicit/Likert objective source is future work. The drive/habituation
-    /// segments are real timers but the car is stationary until the simulator is
-    /// wired.
+    /// firstCondition/includeFreePlay/userId/conditionId/groupId are runtime
+    /// state set by ExperimentUI (the researcher's actual control surface)
+    /// right before StartSession() — not Inspector-configured, since they
+    /// change every participant/session, not every build.
     /// </summary>
-    public class SessionController : MonoBehaviour
+    public class SessionController : MonoBehaviour, IQuestionnaireOptimizationBridge
     {
         public enum Phase
         {
-            Idle, Intro, Meditation, Habituation, Condition,
+            Idle, Intro, Meditation, ConditionIntro,
+            Baseline, WaitingForOptimizer, WaitingForParameters, Washout, Measuring, AwaitingRating,
             Parking, Questionnaire, BreakOffer, FreePlay,
-            Interview, Complete, EmergencyStop
+            Complete, EmergencyStop, Error
         }
 
         public enum ConditionKind { Implicit, Explicit }
 
-        [Header("Links (auto-found if left empty)")]
-        public TrialManager trial;
-        public GuideController guide;
+        /// <summary>What feeds the optimizer's objectives for the condition
+        /// currently running. Physiology: the baseline-deviation pipeline
+        /// (Implicit). Questionnaire: each iteration's objective is the
+        /// participant's raw submitted rating, sent to mobo.py as-is with its
+        /// own [questionnaireMin, questionnaireMax] bounds — see
+        /// SubmitQuestionnaireObjectives. Physiological channels keep
+        /// recording throughout either way — this only controls what's SENT
+        /// TO THE OPTIMIZER.</summary>
+        public enum ObjectiveSource { Physiology, Questionnaire }
 
-        [Header("Structure")]
-        [Tooltip("Counterbalancing: the first main condition. The other one " +
-                 "follows. Alternate this across participants.")]
-        public ConditionKind firstCondition = ConditionKind.Implicit;
-        [Tooltip("Run the optional 6-style free-play round after both main " +
-                 "conditions (kept as a toggle for testing).")]
-        public bool includeFreePlay = true;
+        /// <summary>The only things that genuinely differ per condition kind:
+        /// how long the baseline is and how many iterations to run. Shared BO
+        /// mechanics (activation, boundK, window/washout timing, questionnaire
+        /// range, pythonPath) live in the BO Hub section below instead.</summary>
+        [Serializable]
+        public class ConditionTrialConfig
+        {
+            [Tooltip("Stationary baseline before this condition's drive, seconds.")]
+            [Min(10f)] public float baselineSeconds = 120f;
+            [Tooltip("Only this many seconds at the END of the baseline are " +
+                     "averaged into the reference means.")]
+            [Min(1f)] public float baselineAveragingSeconds = 30f;
+            [Tooltip("Total number of parameter sets the optimizer gets to try.")]
+            [Min(2)] public int iterations = 56;
+            [Tooltip("How many of those iterations are quasi-random (Sobol) " +
+                     "exploration before model-guided optimization starts.")]
+            [Min(1)] public int samplingIterations = 12;
+        }
+
+        // ── Segment plan (session-level pacing) ─────────────────────────
+        private enum SegmentKind
+        {
+            Intro, Meditation, Condition,
+            Parking, Questionnaire, BreakOffer, FreePlay, Complete
+        }
+
+        private struct Segment
+        {
+            public SegmentKind kind;
+            public float seconds;         // timed segments only
+            public ConditionKind condition; // Condition segments only
+        }
+
+        [Header("Links (auto-found if left empty)")]
+        public DelphiManager manager;
+        public CarDriver carDriver;
+        [Tooltip("Recording has to start/stop in sync with each condition's " +
+                 "trial (so sensors.csv/videos/trial_log all land in the same " +
+                 "session folder) — that's the only reason this class needs it.")]
+        public SessionRecorder recorder;
+        [Tooltip("Plays the spoken instructions at each phase transition.")]
+        public NarrationController narration;
+        [Tooltip("The per-iteration rating questionnaire, shown during Explicit " +
+                 "conditions' AwaitingRating phase.")]
+        public QTQuestionnaireManager questionnaire;
+        [Tooltip("The post-condition evaluation questionnaire, shown during the " +
+                 "Questionnaire phase (after Parking, before BreakOffer).")]
+        public QTQuestionnaireManager finalEvaluationQuestionnaire;
+
+        // ── Set by ExperimentUI at runtime, not Inspector-configured ─────
+        // (a researcher picks these fresh per participant/session, not once
+        // per build — see ExperimentUI's session-setup controls.)
+        [HideInInspector] public ConditionKind firstCondition = ConditionKind.Implicit;
+        [HideInInspector] public bool includeFreePlay = true;
+        [HideInInspector] public string userId = "P1";
+        [HideInInspector] public string conditionId = "pilot"; // computed internally per condition, not set by anyone
+        [HideInInspector] public string groupId = "0";
 
         [Header("Timed-phase durations (seconds)")]
-        [Min(0f)] public float introSeconds       = 15f;
-        [Tooltip("Guided meditation / relaxation before the first drive.")]
-        [Min(0f)] public float meditationSeconds   = 60f;
-        [Tooltip("Novelty-washout drive; its data is discarded. Stationary until " +
-                 "the simulator is wired.")]
-        [Min(0f)] public float habituationSeconds  = 60f;
         [Tooltip("Self-park settle time before the questionnaire.")]
-        [Min(0f)] public float parkingSeconds      = 10f;
+        [Min(0f)] public float parkingSeconds = 10f;
 
-        // ── Runtime state ───────────────────────────────────────────────
+        [Header("Trial structure — per condition kind")]
+        public ConditionTrialConfig implicitTrial = new();
+        public ConditionTrialConfig explicitTrial = new();
+
+        [Header("BO Hub — everything that configures the optimizer")]
+        [Tooltip("Shaping applied to every physiology channel's signed " +
+                 "deviation before it goes to the optimizer (Physiology " +
+                 "objective only — Questionnaire ignores this entirely).")]
+        public ActivationFunction activation = ActivationFunction.Linear;
+        [Tooltip("Bound half-width in SDs: each channel's bounds are " +
+                 "baseline ± k·SD, and a window's deviation reaches ±1 there.")]
+        [Min(0.1f)]
+        public float boundK = 3f;
+        [Tooltip("Per-channel literature SD + bad-direction. Auto-populated " +
+                 "from the plugged-in DelphiManager's enabled channels.")]
+        public List<ChannelNormalization> channelConfigs = new();
+        [Tooltip("The rating scale's own range — matches the 7-point Likert " +
+                 "items in the placeholder questionnaires. Sent to mobo.py " +
+                 "as-is (raw rating, not pre-normalized) so its own CSV log " +
+                 "shows the real rating instead of an abstract number. Higher " +
+                 "is treated as the better outcome.")]
+        public float questionnaireMin = 1f;
+        public float questionnaireMax = 7f;
+        [Tooltip("Seconds per iteration — one parameter set is active for " +
+                 "exactly this long before the next one is requested.")]
+        [Min(1f)] public float windowSeconds = 40f;
+        [Tooltip("Seconds discarded at the start of each window before " +
+                 "measurement begins. Must cover BOTH the parameter ramp " +
+                 "(Transition, right below) AND physiological lag (GSR ≈ 1–4s, " +
+                 "HR ≈ 5–10s) — too short and the window measures the tail of " +
+                 "the PREVIOUS parameter set.")]
+        [Min(0f)] public float washoutSeconds = 10f;
+        [Tooltip("When the optimizer hands over a new parameter set, ramp " +
+                 "LINEARLY to it over this many seconds instead of snapping — " +
+                 "an instant jolt is itself a startle stimulus. Clamped to " +
+                 "Washout above so measurement never starts mid-ramp.")]
+        [Min(0f)] public float transitionSeconds = 3f;
+        [Tooltip("Empty = auto: the project-local venv at BOPythonEnv/bin/python3.")]
+        public string pythonPath = "";
+        public int seed = 3;
+
+        /// <summary>Seconds of the window actually averaged into the
+        /// objective, after washout — computed, not separately configured.</summary>
+        public float MeasureSeconds => Mathf.Max(0f, windowSeconds - EffectiveWashoutSeconds);
+        private float EffectiveWashoutSeconds => Mathf.Min(washoutSeconds, windowSeconds);
+
+        // ── Runtime state (read by ExperimentUI / editor) ───────────────
+        public enum OptimizerStatus { NotStarted, Starting, Connected, Disconnected }
+
         public Phase CurrentPhase { get; private set; } = Phase.Idle;
         public string StatusLine { get; private set; } = "Idle";
-        /// <summary>1-based index of the main condition in progress (0 outside a
-        /// condition), and how many there are — for the researcher UI.</summary>
         public int ConditionNumber { get; private set; }
         public int ConditionCount => 2;
         public bool IsAwaitingResearcher { get; private set; }
-        /// <summary>At a BreakOffer, true once the participant chose to take a
-        /// break and we're waiting on ResumeFromBreak() — so the UI can show a
-        /// "resume" control instead of the break/continue pair.</summary>
         public bool AwaitingBreakResume { get; private set; }
-        /// <summary>The kind of condition currently running (or last run) — for
-        /// the researcher UI's per-condition labels.</summary>
         public ConditionKind CurrentConditionKind { get; private set; }
         public bool CanStart => CurrentPhase == Phase.Idle || CurrentPhase == Phase.Complete;
         public double PhaseSecondsRemaining =>
             _phaseEnd > 0 ? Math.Max(0, _phaseEnd - DelphiClock.Now) : 0;
+        /// <summary>True while a condition's baseline/iteration loop is
+        /// actively running.</summary>
+        public bool IsRunningCondition => CurrentPhase is Phase.Baseline or Phase.WaitingForOptimizer
+            or Phase.WaitingForParameters or Phase.Washout or Phase.Measuring or Phase.AwaitingRating;
 
-        [Header("Events (VR/passthrough hooks — optional)")]
-        public UnityEngine.Events.UnityEvent onEmergencyStop;
-        public UnityEngine.Events.UnityEvent onResume;
+        public int Iteration { get; private set; }
+        public int TotalIterations => _activeConfig?.iterations ?? 0;
+        public float LastCoverage { get; private set; } = float.NaN;
 
+        public OptimizerStatus Optimizer
+        {
+            get
+            {
+                if (_bo == null) return OptimizerStatus.NotStarted;
+                if (_bo.Connected) return OptimizerStatus.Connected;
+                if (_bo.ProcessAlive) return OptimizerStatus.Starting;
+                return OptimizerStatus.Disconnected;
+            }
+        }
+
+        // ── Segment plan state ──────────────────────────────────────────
         private readonly List<Segment> _plan = new();
         private int _segmentIndex;
-        private double _phaseEnd;       // DelphiClock time a timed segment ends
-        private Phase _interruptedPhase; // what EmergencyStop paused, for Resume
-        private int _interruptedSegment;
+        private double _phaseEnd;        // DelphiClock time the current timed/trial phase ends
+        private Phase _interruptedPhase; // what EmergencyStop/Fail paused, for Resume
+        private int _interruptedSegment; // Fail()'s Resume path only — rewinds and restarts the segment
 
-        private struct Segment
+        // ── EmergencyStop/Resume pause state (Phase.EmergencyStop only) ──
+        private double _pausedRemaining = -1;  // remaining _phaseEnd countdown at the moment of pausing, -1 = none was running
+        private bool _pausedIsAwaitingResearcher;
+        private bool _pausedAwaitingBreakResume;
+        private string _pausedStatusLine;
+        private bool _wasParkedBeforeStop;     // car was deliberately parked (Parking/AwaitingRating) before the halt
+
+        // ── Trial runtime state ──────────────────────────────────────────
+        private BoBridge _bo;
+        private string _lastBoLaunchError;
+        private bool _trialActuallyStarted;
+        private double _trialStart;
+        private double _driveStart;
+        private WindowAccumulator _acc;
+        private double _measureStart;
+        private ConditionTrialConfig _activeConfig; // implicitTrial or explicitTrial, whichever is running
+        private ObjectiveSource _objectiveSource;
+        private readonly Dictionary<Channel, float> _baseline = new();
+        private List<Channel> _objectiveChannels = new();
+        private List<string> _questionnaireKeys = new();
+        private readonly Dictionary<string, float> _pendingQuestionnaireValues = new();
+        private Dictionary<string, float> _lastParams = new();
+        private StreamWriter _trialLog;
+
+        private Dictionary<string, float> _transFrom;
+        private Dictionary<string, float> _transTo;
+        private double _transStart;
+        private float _transDuration;
+
+        private List<string> _activeParamKeys = new();
+
+        // ── Free-play state ──────────────────────────────────────────────
+        private StreamWriter _freePlayLog;
+        private double _freePlayStart;
+
+        private static readonly string[] ParameterKeys =
         {
-            public Phase phase;
-            public float seconds;        // timed segments only
-            public ConditionKind kind;   // Condition segments only
-        }
+            "accelerationJerk", "brakingJerk", "followDistance",
+            "corneringSpeed", "takeoverProbability", "speedBelowLimit"
+        };
 
         private void Awake()
         {
-            if (trial == null) trial = FindFirstObjectByType<TrialManager>();
-            if (guide == null) guide = FindFirstObjectByType<GuideController>();
+            if (manager == null)    manager    = FindFirstObjectByType<DelphiManager>();
+            if (carDriver == null)  carDriver  = FindFirstObjectByType<CarDriver>();
+            if (recorder == null)   recorder   = FindFirstObjectByType<SessionRecorder>();
+            if (narration == null)  narration  = FindFirstObjectByType<NarrationController>();
+
+            // Auto-advance past Phase.Questionnaire once the participant
+            // submits — no researcher button click needed, unlike the
+            // "no questionnaire linked" fallback path in EnterSegment.
+            if (finalEvaluationQuestionnaire != null)
+                finalEvaluationQuestionnaire.onQuestionnaireFinished.AddListener(ConfirmQuestionnaire);
+
+            // Launch mobo.py the moment Play starts, not when a trial starts —
+            // torch import (several seconds) happens while the researcher is
+            // still doing pre-session setup instead of during the baseline.
+            PrewarmOptimizer();
         }
 
         // ── Public control (researcher UI) ──────────────────────────────
-        /// <summary>Build the plan and begin. No-op unless idle/complete.</summary>
+        /// <summary>Build the plan and begin. No-op unless idle/complete.
+        /// firstCondition/includeFreePlay/userId/groupId should already be
+        /// set by the caller (ExperimentUI) before calling this.</summary>
         public bool StartSession()
         {
             if (CurrentPhase != Phase.Idle && CurrentPhase != Phase.Complete)
@@ -126,7 +289,7 @@ namespace Delphi.Session
             BuildPlan();
             _segmentIndex = -1;
             ConditionNumber = 0;
-            Debug.Log($"[Session] Starting — first condition {firstCondition}, " +
+            Debug.Log($"[Session] Starting — participant '{userId}', first condition {firstCondition}, " +
                       $"free-play {(includeFreePlay ? "on" : "off")}, {_plan.Count} segments.");
             AdvanceToNextSegment();
             return true;
@@ -139,14 +302,11 @@ namespace Delphi.Session
             if (CurrentPhase == Phase.Questionnaire) AdvanceToNextSegment();
         }
 
-        /// <summary>Researcher relays the participant's break choice at a
-        /// BreakOffer. Break → guide lets them out, then Resume() (or the same
-        /// UI's continue) proceeds; Continue → straight on to the next drive.</summary>
         public void ChooseBreak()
         {
             if (CurrentPhase != Phase.BreakOffer) return;
-            guide?.Play(GuideController.Line.BreakGranted);
-            IsAwaitingResearcher = true; // wait on ResumeFromBreak()
+            narration?.Play(NarrationController.Line.BreakGranted);
+            IsAwaitingResearcher = true;
             AwaitingBreakResume = true;
             StatusLine = "Break — waiting to resume the next condition";
         }
@@ -154,70 +314,140 @@ namespace Delphi.Session
         public void ChooseContinue()
         {
             if (CurrentPhase != Phase.BreakOffer) return;
-            guide?.Play(GuideController.Line.ContinueDrive);
+            narration?.Play(NarrationController.Line.ContinueDrive);
             AdvanceToNextSegment();
         }
 
-        /// <summary>Researcher: come back from a granted break into the next
-        /// condition.</summary>
         public void ResumeFromBreak()
         {
             if (CurrentPhase == Phase.BreakOffer && IsAwaitingResearcher)
             {
                 IsAwaitingResearcher = false;
-                guide?.Play(GuideController.Line.ContinueDrive);
+                narration?.Play(NarrationController.Line.ContinueDrive);
                 AdvanceToNextSegment();
             }
         }
 
-        /// <summary>Researcher: free-play round is over.</summary>
         public void EndFreePlay()
         {
-            if (CurrentPhase == Phase.FreePlay) AdvanceToNextSegment();
+            if (CurrentPhase != Phase.FreePlay) return;
+            _freePlayLog?.Close();
+            _freePlayLog = null;
+            if (recorder != null && recorder.IsRecording) recorder.StopRecording();
+            AdvanceToNextSegment();
         }
 
-        /// <summary>Researcher: the closing interview is done.</summary>
-        public void EndInterview()
+        /// <summary>Live manual control during Phase.FreePlay — called by
+        /// ExperimentUI whenever the researcher/participant drags a slider.
+        /// Applies the value directly (no ramp — this is manual dial-in, not
+        /// a BO handoff) and logs the change so the recording folder shows
+        /// what was active when. No-op outside FreePlay.</summary>
+        public void SetFreePlayParameter(string key, float value)
         {
-            if (CurrentPhase == Phase.Interview) AdvanceToNextSegment();
+            if (CurrentPhase != Phase.FreePlay || carDriver == null) return;
+            SetParam(carDriver.parameters, key, Mathf.Clamp01(value));
+            LogFreePlayRow();
         }
 
-        /// <summary>Safety halt — usable at ANY point. Aborts a running trial,
-        /// remembers where we were, and waits in EmergencyStop until Resume().
-        /// The physical platform-return/passthrough is an onEmergencyStop
-        /// listener (VR layer).</summary>
+        private void StartFreePlayLogging()
+        {
+            if (recorder != null && !recorder.IsRecording)
+                recorder.StartRecording($"freeplay_{userId}");
+
+            string dir = recorder != null && recorder.IsRecording
+                ? recorder.CurrentSessionPath
+                : Path.Combine(Application.persistentDataPath, "Trials");
+            Directory.CreateDirectory(dir);
+            _freePlayStart = DelphiClock.Now;
+            _freePlayLog = new StreamWriter(Path.Combine(dir, "freeplay_log.csv"));
+            var header = new StringBuilder("t_s");
+            foreach (var key in ParameterKeys) header.Append(',').Append(key);
+            _freePlayLog.WriteLine(header.ToString());
+            _freePlayLog.Flush();
+            LogFreePlayRow(); // capture the starting values too, not just changes
+        }
+
+        private void LogFreePlayRow()
+        {
+            if (_freePlayLog == null || carDriver == null) return;
+            var p = carDriver.parameters;
+            var row = new StringBuilder();
+            row.Append(F(DelphiClock.Now - _freePlayStart));
+            foreach (float v in new[] { p.accelerationJerk, p.brakingJerk, p.followDistance,
+                                        p.corneringSpeed, p.takeoverProbability, p.speedBelowLimit })
+                row.Append(',').Append(F(v));
+            _freePlayLog.WriteLine(row.ToString());
+            _freePlayLog.Flush();
+        }
+
+
+        /// <summary>Safety halt — usable at ANY point. TRUE pause, not an
+        /// abort: halts the car in place and freezes whatever countdown is
+        /// running (baseline/washout/measuring/intro-narration timers all
+        /// share the same _phaseEnd mechanism), but leaves everything else —
+        /// the optimizer connection, accumulated baseline/iteration data,
+        /// the trial log, recording — completely untouched. Resume() picks
+        /// back up in the SAME phase, so repeated stop/resume clicks can't
+        /// skip ahead or re-run a condition (the old design restarted the
+        /// whole condition segment on resume, which both threw away the live
+        /// optimizer connection and — combined with EnterCondition not
+        /// setting CurrentPhase until its intro narration finished — let a
+        /// second Resume click during that window re-enter a second time).</summary>
         public void EmergencyStop()
         {
-            if (CurrentPhase == Phase.EmergencyStop || CurrentPhase == Phase.Idle) return;
+            if (CurrentPhase == Phase.EmergencyStop || CurrentPhase == Phase.Idle || CurrentPhase == Phase.Complete) return;
             _interruptedPhase = CurrentPhase;
-            _interruptedSegment = _segmentIndex;
-            if (trial != null && trial.State != TrialManager.TrialState.Idle &&
-                trial.State != TrialManager.TrialState.Finished &&
-                trial.State != TrialManager.TrialState.Error)
-                trial.AbortTrial();
+            _pausedRemaining = _phaseEnd > 0 ? Math.Max(0, _phaseEnd - DelphiClock.Now) : -1;
+            _pausedIsAwaitingResearcher = IsAwaitingResearcher;
+            _pausedAwaitingBreakResume = AwaitingBreakResume;
+            _pausedStatusLine = StatusLine;
+            _wasParkedBeforeStop = carDriver != null && carDriver.IsParked;
+
+            carDriver?.EmergencyHalt();
             CurrentPhase = Phase.EmergencyStop;
             _phaseEnd = 0;
             IsAwaitingResearcher = true;
             StatusLine = $"EMERGENCY STOP (was {_interruptedPhase})";
-            guide?.Play(GuideController.Line.EmergencyStop);
-            onEmergencyStop?.Invoke();
-            Debug.LogWarning($"[Session] Emergency stop during {_interruptedPhase}.");
+            narration?.Play(NarrationController.Line.EmergencyStop);
+            Debug.LogWarning($"[Session] Emergency stop during {_interruptedPhase} — paused in place; " +
+                              "optimizer connection and trial state untouched.");
         }
 
-        /// <summary>Come back from an emergency stop. A condition can't be safely
-        /// resumed mid-optimization, so we restart the interrupted condition's
-        /// segment cleanly; non-condition segments just re-enter.</summary>
+        /// <summary>Come back from an emergency stop (continues exactly where
+        /// it paused) or a trial error (the trial was already torn down by
+        /// Fail(), so this restarts the interrupted condition's segment
+        /// cleanly instead — there's nothing left to resume in place).</summary>
         public void Resume()
         {
-            if (CurrentPhase != Phase.EmergencyStop) return;
-            IsAwaitingResearcher = false;
-            onResume?.Invoke();
-            guide?.Play(GuideController.Line.ResumeAfterStop);
-            // Re-enter the interrupted segment from the top (a half-finished
-            // trial was aborted, so restart it rather than resume a dead run).
-            _segmentIndex = _interruptedSegment - 1;
-            Debug.Log($"[Session] Resuming — restarting segment {_interruptedSegment} ({_interruptedPhase}).");
-            AdvanceToNextSegment();
+            if (CurrentPhase == Phase.EmergencyStop)
+            {
+                if (!_wasParkedBeforeStop) carDriver?.ResumeDriving();
+                if (_pausedRemaining >= 0) _phaseEnd = DelphiClock.Now + _pausedRemaining;
+                CurrentPhase = _interruptedPhase;
+                IsAwaitingResearcher = _pausedIsAwaitingResearcher;
+                AwaitingBreakResume = _pausedAwaitingBreakResume;
+                StatusLine = _pausedStatusLine;
+                narration?.Play(NarrationController.Line.ResumeAfterStop);
+                Debug.Log($"[Session] Resumed — continuing {_interruptedPhase} in place.");
+            }
+            else if (CurrentPhase == Phase.Error)
+            {
+                IsAwaitingResearcher = false;
+                narration?.Play(NarrationController.Line.ResumeAfterStop);
+                _segmentIndex = _interruptedSegment - 1;
+                Debug.Log($"[Session] Resuming after error — restarting segment {_interruptedSegment} ({_interruptedPhase}).");
+                AdvanceToNextSegment();
+            }
+        }
+
+        public void AbortTrial()
+        {
+            if (!IsRunningCondition) return;
+            Cleanup("Aborted by user");
+            PrewarmOptimizer(); // keep an optimizer warm for the next attempt
+            CurrentPhase = Phase.Idle;
+            StatusLine = "Aborted";
+            Debug.Log("[Trial] Aborted.");
         }
 
         // ── Plan construction ───────────────────────────────────────────
@@ -227,29 +457,33 @@ namespace Delphi.Session
             ConditionKind second = firstCondition == ConditionKind.Implicit
                 ? ConditionKind.Explicit : ConditionKind.Implicit;
 
-            Add(Phase.Intro, introSeconds);
-            Add(Phase.Meditation, meditationSeconds);
-            Add(Phase.Habituation, habituationSeconds);
+            Add(SegmentKind.Intro);
+            Add(SegmentKind.Meditation);
 
             AddCondition(firstCondition);
-            Add(Phase.Parking, parkingSeconds);
-            Add(Phase.Questionnaire);
-            Add(Phase.BreakOffer);
+            Add(SegmentKind.Parking, parkingSeconds);
+            Add(SegmentKind.Questionnaire);
+            Add(SegmentKind.BreakOffer);
 
             AddCondition(second);
-            Add(Phase.Parking, parkingSeconds);
-            Add(Phase.Questionnaire);
+            Add(SegmentKind.Parking, parkingSeconds);
+            Add(SegmentKind.Questionnaire);
 
-            if (includeFreePlay) Add(Phase.FreePlay);
-            Add(Phase.Interview);
-            Add(Phase.Complete);
+            if (includeFreePlay)
+            {
+                Add(SegmentKind.BreakOffer);
+                Add(SegmentKind.FreePlay);
+                Add(SegmentKind.Questionnaire);
+            }
+
+            Add(SegmentKind.Complete);
         }
 
-        private void Add(Phase phase, float seconds = 0f) =>
-            _plan.Add(new Segment { phase = phase, seconds = seconds });
+        private void Add(SegmentKind kind, float seconds = 0f) =>
+            _plan.Add(new Segment { kind = kind, seconds = seconds });
 
         private void AddCondition(ConditionKind kind) =>
-            _plan.Add(new Segment { phase = Phase.Condition, kind = kind });
+            _plan.Add(new Segment { kind = SegmentKind.Condition, condition = kind });
 
         // ── Segment walk ────────────────────────────────────────────────
         private void AdvanceToNextSegment()
@@ -261,81 +495,88 @@ namespace Delphi.Session
 
         private void EnterSegment(Segment seg)
         {
-            CurrentPhase = seg.phase;
             IsAwaitingResearcher = false;
             AwaitingBreakResume = false;
             _phaseEnd = 0;
 
-            switch (seg.phase)
+            switch (seg.kind)
             {
-                case Phase.Intro:
-                    guide?.Play(GuideController.Line.Welcome);
-                    StartTimer(seg.seconds, "Intro — welcome & task briefing");
+                case SegmentKind.Intro:
+                    CurrentPhase = Phase.Intro;
+                    narration?.Play(NarrationController.Line.Welcome);
+                    StartTimer(NarrationSeconds(NarrationController.Line.Welcome), "Intro — welcome & task briefing");
                     break;
 
-                case Phase.Meditation:
-                    guide?.Play(GuideController.Line.Meditation);
-                    StartTimer(seg.seconds, "Meditation — relax with calm music");
+                case SegmentKind.Meditation:
+                    CurrentPhase = Phase.Meditation;
+                    narration?.Play(NarrationController.Line.Meditation);
+                    StartTimer(NarrationSeconds(NarrationController.Line.Meditation), "Meditation — relax with calm music");
                     break;
 
-                case Phase.Habituation:
-                    guide?.Play(GuideController.Line.HabituationStart);
-                    StartTimer(seg.seconds, "Habituation drive — data discarded");
+                case SegmentKind.Condition:
+                    EnterCondition(seg.condition);
                     break;
 
-                case Phase.Condition:
-                    EnterCondition(seg.kind);
-                    break;
-
-                case Phase.Parking:
-                    guide?.Play(GuideController.Line.Parking);
+                case SegmentKind.Parking:
+                    CurrentPhase = Phase.Parking;
+                    narration?.Play(NarrationController.Line.Parking);
+                    carDriver?.RequestPark();
                     StartTimer(seg.seconds, "Parking");
                     break;
 
-                case Phase.Questionnaire:
-                    guide?.Play(GuideController.Line.Questionnaire);
-                    IsAwaitingResearcher = true;
-                    StatusLine = "Questionnaire — waiting for participant";
+                case SegmentKind.Questionnaire:
+                    CurrentPhase = Phase.Questionnaire;
+                    narration?.Play(NarrationController.Line.Questionnaire);
+                    if (finalEvaluationQuestionnaire != null)
+                    {
+                        finalEvaluationQuestionnaire.StartQuestionnaire();
+                        StatusLine = "Final evaluation questionnaire — waiting for participant";
+                    }
+                    else
+                    {
+                        IsAwaitingResearcher = true;
+                        StatusLine = "Questionnaire — waiting for participant (no QTQuestionnaireManager linked)";
+                    }
                     break;
 
-                case Phase.BreakOffer:
-                    guide?.Play(GuideController.Line.BreakOffer);
+                case SegmentKind.BreakOffer:
+                    CurrentPhase = Phase.BreakOffer;
+                    narration?.Play(NarrationController.Line.BreakOffer);
                     IsAwaitingResearcher = true;
                     StatusLine = "Break? — awaiting participant's choice";
                     break;
 
-                case Phase.FreePlay:
-                    guide?.Play(GuideController.Line.FreePlayIntro);
+                case SegmentKind.FreePlay:
+                    CurrentPhase = Phase.FreePlay;
+                    narration?.Play(NarrationController.Line.FreePlayIntro);
                     IsAwaitingResearcher = true;
-                    StatusLine = "Free-play — participant explores 6 styles";
+                    StatusLine = "Free-play — manual slider control, recording";
+                    StartFreePlayLogging();
                     break;
 
-                case Phase.Interview:
-                    guide?.Play(GuideController.Line.Farewell);
-                    IsAwaitingResearcher = true;
-                    StatusLine = "Closing interview";
-                    break;
-
-                case Phase.Complete:
+                case SegmentKind.Complete:
                     EnterComplete();
                     break;
             }
         }
 
+        private const float DefaultNarrationFallbackSeconds = 3f; // no NarrationController linked at all
+
+        private float NarrationSeconds(NarrationController.Line line) =>
+            narration != null ? narration.WaitSeconds(line) : DefaultNarrationFallbackSeconds;
+
         private void EnterCondition(ConditionKind kind)
         {
             ConditionNumber++;
             CurrentConditionKind = kind;
-            guide?.Play(GuideController.Line.ConditionStart);
-            StatusLine = $"Condition {ConditionNumber}/{ConditionCount} ({kind}) — starting";
 
-            if (trial == null) { Fail("No TrialManager linked."); return; }
-            trial.conditionId = kind.ToString().ToLowerInvariant();
-            // NOTE: both kinds currently run the physiology-objective trial.
-            // Explicit needs a Likert objective source (future brick); until
-            // then it behaves like Implicit but is tagged "explicit" in logs.
-            if (!trial.StartTrial())
-                Fail($"Could not start the {kind} trial — see [Trial] console output.");
+            var introLine = kind == ConditionKind.Implicit
+                ? NarrationController.Line.IntroImplicit
+                : NarrationController.Line.IntroExplicit;
+
+            narration?.Play(introLine);
+            CurrentPhase = Phase.ConditionIntro;
+            StartTimer(NarrationSeconds(introLine), $"Condition {ConditionNumber}/{ConditionCount} ({kind}) — intro");
         }
 
         private void StartTimer(float seconds, string status)
@@ -351,58 +592,859 @@ namespace Delphi.Session
             IsAwaitingResearcher = false;
             _phaseEnd = 0;
             StatusLine = "Session complete";
+            narration?.Play(NarrationController.Line.Finished);
             Debug.Log("[Session] Complete.");
         }
 
-        private void Fail(string why)
+        private bool Fail(string why)
         {
             Debug.LogError($"[Session] {why}");
-            StatusLine = $"Error: {why}";
+            _interruptedPhase = CurrentPhase;
+            _interruptedSegment = _segmentIndex;
+            Cleanup($"Error: {why}");
+            PrewarmOptimizer(); // ready for the retry Resume() triggers
+            CurrentPhase = Phase.Error;
+            StatusLine = why;
             IsAwaitingResearcher = true; // stop here; researcher decides what to do
-            CurrentPhase = Phase.EmergencyStop;
+            return false;
         }
 
         // ── Tick ────────────────────────────────────────────────────────
         private void Update()
         {
+            // Independent of phase — a ramp started as we entered Washout must
+            // keep advancing every frame until it completes.
+            TickTransition();
+
+            // Independent of phase too — keep trying to connect the moment a
+            // (pre-warmed or freshly launched) optimizer process is booting,
+            // rather than only polling once a condition's baseline starts.
+            if (_bo != null && !_bo.Connected) _bo.TryConnect();
+
             switch (CurrentPhase)
             {
                 case Phase.Intro:
                 case Phase.Meditation:
-                case Phase.Habituation:
+                case Phase.ConditionIntro:
                 case Phase.Parking:
-                    if (_phaseEnd > 0 && DelphiClock.Now >= _phaseEnd) AdvanceToNextSegment();
+                    if (_phaseEnd > 0 && DelphiClock.Now >= _phaseEnd)
+                    {
+                        if (CurrentPhase == Phase.ConditionIntro) StartConditionTrial(CurrentConditionKind);
+                        else AdvanceToNextSegment();
+                    }
                     break;
 
-                case Phase.Condition:
-                    TickCondition();
-                    break;
+                case Phase.Baseline:              TickBaseline(); break;
+                case Phase.WaitingForOptimizer:    TickWaitingForOptimizer(); break;
+                case Phase.WaitingForParameters:
+                case Phase.Washout:
+                case Phase.Measuring:
+                case Phase.AwaitingRating:         TickIterationLoop(); break;
             }
+
+            // A dead optimizer process mid-condition is fatal.
+            if (IsRunningCondition && _bo != null && !_bo.ProcessAlive)
+                Fail("Optimizer process exited unexpectedly — see [BO] console output.");
         }
 
-        private void TickCondition()
+        // ── Trial: starting a condition ─────────────────────────────────
+        private void StartConditionTrial(ConditionKind kind)
         {
-            if (trial == null) return;
-            switch (trial.State)
+            _trialActuallyStarted = false;
+
+            if (manager == null || manager.Core == null) { Fail("No DelphiManager/core running."); return; }
+            if (carDriver == null)                        { Fail("No CarDriver in the scene."); return; }
+
+            conditionId = kind.ToString().ToLowerInvariant();
+            _objectiveSource = kind == ConditionKind.Explicit ? ObjectiveSource.Questionnaire : ObjectiveSource.Physiology;
+            _activeConfig = kind == ConditionKind.Implicit ? implicitTrial : explicitTrial;
+
+            // Fail fast here rather than only at baseline-end — otherwise a
+            // misconfigured Explicit trial wastes a full baseline period
+            // before anyone notices.
+            if (_objectiveSource == ObjectiveSource.Questionnaire)
             {
-                case TrialManager.TrialState.Finished:
-                    Debug.Log($"[Session] Condition {ConditionNumber} finished.");
-                    AdvanceToNextSegment();
-                    break;
-                case TrialManager.TrialState.Error:
-                    Fail($"Condition {ConditionNumber} trial errored — see [Trial] console output.");
-                    break;
-                default:
-                    // Mirror the trial's own live status so the researcher UI
-                    // shows baseline/washout/measuring without duplicating it.
-                    StatusLine = $"Condition {ConditionNumber}/{ConditionCount} — {trial.StatusLine}";
-                    break;
+                if (questionnaire == null) { Fail("objectiveSource is Questionnaire but no QTQuestionnaireManager is linked."); return; }
+                int headerCount = questionnaire.resultsHeaderItems?.Count ?? 0;
+                if (headerCount < 2) { Fail("mobo.py needs ≥2 objectives — the linked questionnaire has fewer than 2 header items configured."); return; }
+            }
+            else if (CandidateChannels().Count < 2)
+            {
+                Fail("mobo.py needs ≥2 objectives — attach and enable at least two scalar sensors on DelphiManager.");
+                return;
+            }
+
+            // Recording runs for the whole trial; csv + videos + trial log all
+            // land in one session folder.
+            if (recorder != null && !recorder.IsRecording)
+                recorder.StartRecording($"trial_{userId}_{conditionId}");
+
+            // Usually already booting/connected — PrewarmOptimizer() launches
+            // it at Awake() and again right after each condition finishes.
+            // Only launch it here as a fallback if that hasn't happened yet.
+            if (_bo == null)
+            {
+                PrewarmOptimizer();
+                if (_bo == null) { Fail(_lastBoLaunchError ?? "Could not launch the optimizer process."); return; }
+            }
+
+            _trialStart = DelphiClock.Now;
+            _trialActuallyStarted = true;
+            _phaseEnd = _trialStart + _activeConfig.baselineSeconds;
+            Iteration = 0;
+            LastCoverage = float.NaN;
+            _baseline.Clear();
+            _acc = null;
+            _transTo = null;
+            CurrentPhase = Phase.Baseline;
+            StatusLine = "Baseline — participant sits still";
+            Debug.Log($"[Trial] Started ({kind}): baseline {_activeConfig.baselineSeconds:0}s " +
+                      $"(avg last {_activeConfig.baselineAveragingSeconds:0}s), then " +
+                      $"{_activeConfig.iterations} × {windowSeconds:0}s windows. " +
+                      $"Objective source: {_objectiveSource}.");
+
+            // Baseline is stationary, in BOTH conditions — the car must stay
+            // parked here. It should already be (startParked at session
+            // start for the first condition, or the Parking segment between
+            // conditions for the second) — this is a diagnostic, not a fix:
+            // if it fires, something upstream left the car driving.
+            if (carDriver != null && !carDriver.IsParked)
+                Debug.LogWarning("[Trial] Baseline is starting but the car isn't parked. Baseline must be " +
+                                  "stationary — check CarDriver.startParked (should be true) if this is " +
+                                  "the first condition, since there's no Parking segment before it.");
+        }
+
+        private void TickBaseline()
+        {
+            // Connecting is handled generically in Update() now (so it starts
+            // the moment the process boots, not just once baseline begins).
+
+            double avgStart = _phaseEnd - _activeConfig.baselineAveragingSeconds;
+            if (_acc == null && DelphiClock.Now >= avgStart)
+            {
+                _acc = new WindowAccumulator();
+                manager.Core.Accumulator = _acc;
+            }
+
+            if (DelphiClock.Now < _phaseEnd) return;
+
+            // Baseline over — snapshot the per-channel reference MEAN for
+            // whatever's attached, REGARDLESS of objectiveSource: harmless,
+            // and still useful post-hoc reference data even for channels that
+            // won't feed the optimizer this trial (e.g. physiology during an
+            // Explicit/Questionnaire condition). The bounds come from
+            // baseline ± k·(literature SD), NOT from anything measured here.
+            manager.Core.Accumulator = null;
+            var physiologyObjectiveChannels = new List<Channel>();
+            _baseline.Clear();
+            foreach (var ch in CandidateChannels())
+            {
+                var (mean, count) = _acc.Mean(ch);
+                if (count == 0)
+                {
+                    Debug.LogWarning($"[Trial] {ch} produced no baseline samples — excluded from objectives.");
+                    continue;
+                }
+                _baseline[ch] = mean;
+                physiologyObjectiveChannels.Add(ch);
+                var cfg = EffectiveConfig(ch);
+                var (lo, hi) = ChannelMath.Bounds(mean, cfg.sd, boundK);
+                Debug.Log($"[Trial] Baseline {ch}: mean {mean:F2} ({count} samples) → bounds [{lo:F2}, {hi:F2}] " +
+                          $"(SD {cfg.sd}, {(cfg.higherIsBetter ? "higher is better" : "higher is worse")})");
+            }
+            _acc = null;
+
+            // What actually gets sent to the optimizer as objectives —
+            // Questionnaire mode ignores the physiology scan above entirely
+            // (there's no DelphiManager channel here at all; the objective
+            // keys come straight from the questionnaire's own header names).
+            if (_objectiveSource == ObjectiveSource.Questionnaire)
+            {
+                _objectiveChannels = new List<Channel>();
+                _questionnaireKeys = questionnaire.resultsHeaderItems != null
+                    ? new List<string>(questionnaire.resultsHeaderItems)
+                    : new List<string>();
+
+                if (_questionnaireKeys.Count < 2)
+                {
+                    Fail("Fewer than 2 questionnaire header items are configured — cannot run MOBO.");
+                    return;
+                }
+            }
+            else
+            {
+                _questionnaireKeys = new List<string>();
+                _objectiveChannels = physiologyObjectiveChannels;
+                if (_objectiveChannels.Count < 2)
+                {
+                    Fail("Fewer than 2 channels delivered baseline data — cannot run MOBO.");
+                    return;
+                }
+            }
+
+            _driveStart = DelphiClock.Now;
+            CurrentPhase = Phase.WaitingForOptimizer;
+            _phaseEnd = DelphiClock.Now + 60; // generous cap for torch import
+            StatusLine = "Baseline done — waiting for optimizer";
+        }
+
+        private void TickWaitingForOptimizer()
+        {
+            if (!_bo.TryConnect())
+            {
+                if (DelphiClock.Now > _phaseEnd)
+                    Fail("Optimizer never opened its socket — see [BO] console output.");
+                return;
+            }
+
+            if (!SendInit()) return; // Fail() already set Phase.Error
+            OpenTrialLog();
+            CurrentPhase = Phase.WaitingForParameters;
+            _phaseEnd = 0;
+            StatusLine = "Waiting for first parameter set";
+        }
+
+        private void TickIterationLoop()
+        {
+            DrainMessages();
+
+            if (CurrentPhase == Phase.Washout && DelphiClock.Now >= _phaseEnd)
+            {
+                if (_objectiveSource == ObjectiveSource.Questionnaire)
+                {
+                    // No windowed mean to gather — a rating is one discrete
+                    // value, not a sampled signal. Park (no jerk on the seat
+                    // either way) and wait for the participant to submit;
+                    // RequestNextIteration() (the bridge callback) is what
+                    // ends this phase, not a timer.
+                    CurrentPhase = Phase.AwaitingRating;
+                    StatusLine = $"Iteration {Iteration}/{TotalIterations} — parked, awaiting rating";
+                    _measureStart = DelphiClock.Now;
+                    _pendingQuestionnaireValues.Clear();
+                    carDriver?.RequestPark();
+                    questionnaire.StartQuestionnaire();
+                }
+                else
+                {
+                    _acc = new WindowAccumulator();
+                    manager.Core.Accumulator = _acc;
+                    _measureStart = DelphiClock.Now;
+                    _phaseEnd = _measureStart + MeasureSeconds;
+                    CurrentPhase = Phase.Measuring;
+                    StatusLine = $"Iteration {Iteration}/{TotalIterations} — measuring";
+                }
+            }
+            else if (CurrentPhase == Phase.Measuring && DelphiClock.Now >= _phaseEnd)
+            {
+                manager.Core.Accumulator = null;
+                SubmitObjectives();
+                _acc = null;
+                CurrentPhase = Phase.WaitingForParameters;
+                _phaseEnd = 0;
+                StatusLine = $"Iteration {Iteration}/{TotalIterations} — submitted, waiting";
+            }
+            // AwaitingRating has no timer check here — see RequestNextIteration.
+        }
+
+        private void DrainMessages()
+        {
+            // _bo goes null when optimization_finished tears the bridge down
+            // mid-drain — re-check every pass, not just on entry.
+            while (_bo != null && _bo.Incoming.TryDequeue(out var msg))
+            {
+                switch ((string)msg["type"])
+                {
+                    case "parameters":
+                        ApplyParameters((JObject)msg["values"]);
+                        Iteration++;
+                        // Baseline (and any wait before this point) was
+                        // stationary — the drive begins exactly when the
+                        // first real BO-chosen parameter set is about to be
+                        // applied. No-ops on every later iteration (already
+                        // driving by then) — safe/idempotent to call every time.
+                        carDriver?.ResumeDriving();
+                        CurrentPhase = Phase.Washout;
+                        _phaseEnd = DelphiClock.Now + EffectiveWashoutSeconds;
+                        StatusLine = $"Iteration {Iteration}/{TotalIterations} — washout";
+                        break;
+
+                    case "coverage":
+                    case "tempCoverage":
+                        LastCoverage = (float)msg["value"];
+                        break;
+
+                    case "optimization_finished":
+                        Debug.Log($"[Trial] Optimization finished. Condition {ConditionNumber} done.");
+                        Cleanup("Finished");
+                        // mobo.py exits after one run — immediately launch the
+                        // next condition's process (if any) so it's already
+                        // warm by the time the researcher/flow reaches it.
+                        if (ConditionNumber < ConditionCount) PrewarmOptimizer();
+                        AdvanceToNextSegment();
+                        return; // bridge is gone; stop draining
+                }
             }
         }
+
+        // Mirrors what CarDriver's OWN driving logic actually checks — off
+        // means the axis provably has zero effect on the car. A disabled
+        // axis is EXCLUDED from the search space entirely, not sent as a
+        // dimension the optimizer wastes budget exploring for no signal.
+        private bool IsParamOn(string key) => key switch
+        {
+            "accelerationJerk"    => carDriver.parameters.accelerationJerkOn,
+            "brakingJerk"         => carDriver.parameters.brakingJerkOn,
+            "followDistance"      => carDriver.parameters.followDistanceOn,
+            "corneringSpeed"      => carDriver.parameters.corneringSpeedOn,
+            "takeoverProbability" => carDriver.parameters.takeoverProbabilityOn,
+            "speedBelowLimit"     => carDriver.parameters.speedBelowLimitOn,
+            _                     => true
+        };
+
+        // ── Optimizer messages ──────────────────────────────────────────
+        private bool SendInit()
+        {
+            _activeParamKeys = ParameterKeys.Where(IsParamOn).ToList();
+            if (_activeParamKeys.Count == 0)
+            {
+                Fail("All six driving parameters are disabled on CarDriver — nothing for the optimizer to search over.");
+                return false;
+            }
+
+            var parameters = new JArray();
+            foreach (var key in _activeParamKeys)
+                parameters.Add(new JObject { ["key"] = key, ["init"] = "0,1" });
+
+            bool isQuestionnaire = _objectiveSource == ObjectiveSource.Questionnaire;
+            List<string> objectiveKeys;
+            var objectives = new JArray();
+
+            if (isQuestionnaire)
+            {
+                // RAW rating, native scale — mobo.py does its own
+                // normalization AND uses [lo,hi] to denormalize back to
+                // native units for its own CSV research log. Sending an
+                // already-pre-normalized [0,1] value here (as an earlier
+                // version of this did) made that log show a meaningless
+                // abstract number instead of the actual 1-7 rating.
+                // minimize=0: higher raw rating = better outcome.
+                objectiveKeys = _questionnaireKeys;
+                foreach (var key in objectiveKeys)
+                {
+                    string objInit = string.Format(CultureInfo.InvariantCulture, "{0},{1},{2}", questionnaireMin, questionnaireMax, 0);
+                    objectives.Add(new JObject { ["key"] = key, ["init"] = objInit });
+                }
+            }
+            else
+            {
+                // Physiology: we've ALREADY shaped/oriented the deviation in
+                // C# (activation function, higherIsBetter flip) into a value
+                // where lower=better, so mobo.py's minimize=1 here is a
+                // second, deliberate flip that composes correctly with our
+                // own — see SubmitObjectives. This one intentionally does NOT
+                // pass through raw native units (Tanh/ReLU shaping has no
+                // equivalent in mobo.py's plain linear normalize).
+                var (lo, hi) = ChannelMath.ObjectiveRange(activation);
+                objectiveKeys = _objectiveChannels.Select(ch => ch.ToString()).ToList();
+                foreach (var key in objectiveKeys)
+                {
+                    string objInit = string.Format(CultureInfo.InvariantCulture, "{0},{1},{2}", lo, hi, 1);
+                    objectives.Add(new JObject { ["key"] = key, ["init"] = objInit });
+                }
+            }
+
+            int sampling = Mathf.Clamp(_activeConfig.samplingIterations, 1, _activeConfig.iterations - 1);
+            var init = new JObject
+            {
+                ["type"] = "init",
+                ["config"] = new JObject
+                {
+                    ["numSamplingIterations"] = sampling,
+                    ["numOptimizationIterations"] = _activeConfig.iterations - sampling,
+                    ["batchSize"] = 1, ["numRestarts"] = 10,
+                    ["rawSamples"] = 512, ["mcSamples"] = 256,
+                    ["seed"] = seed,
+                    ["nParameters"] = _activeParamKeys.Count,
+                    ["nObjectives"] = objectiveKeys.Count,
+                    ["warmStart"] = false
+                },
+                ["user"] = new JObject
+                {
+                    ["userId"] = userId, ["conditionId"] = conditionId, ["groupId"] = groupId
+                },
+                ["parameters"] = parameters,
+                ["objectives"] = objectives
+            };
+            _bo.Send(init);
+
+            var excluded = ParameterKeys.Except(_activeParamKeys).ToList();
+            Debug.Log($"[Trial] Init sent: {_activeParamKeys.Count} parameters " +
+                      $"({string.Join(", ", _activeParamKeys)})" +
+                      (excluded.Count > 0 ? $" — excluded (disabled on CarDriver): {string.Join(", ", excluded)}" : "") +
+                      $", {objectiveKeys.Count} objectives ({string.Join(", ", objectiveKeys)}), " +
+                      (isQuestionnaire ? $"questionnaire source, range [{questionnaireMin},{questionnaireMax}] maximize."
+                                       : $"activation {activation} minimize."));
+            return true;
+        }
+
+        private void ApplyParameters(JObject values)
+        {
+            var p = carDriver.parameters;
+            _transFrom = new Dictionary<string, float>();
+            _transTo = new Dictionary<string, float>();
+            foreach (var key in ParameterKeys)
+            {
+                float current = GetParam(p, key);
+                _transFrom[key] = current;
+                _transTo[key] = Get(values, key, current);
+            }
+            _transStart = DelphiClock.Now;
+
+            _transDuration = Mathf.Clamp(transitionSeconds, 0f, EffectiveWashoutSeconds);
+            if (transitionSeconds > EffectiveWashoutSeconds)
+                Debug.LogWarning($"[Trial] transitionSeconds ({transitionSeconds:0.#}s) exceeds the washout " +
+                                 $"({EffectiveWashoutSeconds:0.#}s) — clamped to {_transDuration:0.#}s so measurement never " +
+                                 "starts mid-ramp.");
+
+            _lastParams = new Dictionary<string, float>();
+            foreach (var prop in values.Properties()) _lastParams[prop.Name] = (float)prop.Value;
+
+            Debug.Log($"[Trial] Applied parameter set #{Iteration + 1} (ramping over {_transDuration:0.#}s): " +
+                      $"{values.ToString(Newtonsoft.Json.Formatting.None)}");
+        }
+
+        private void TickTransition()
+        {
+            if (_transTo == null || carDriver == null) return;
+            float t = _transDuration > 0f
+                ? Mathf.Clamp01((float)((DelphiClock.Now - _transStart) / _transDuration))
+                : 1f;
+            var p = carDriver.parameters;
+            foreach (var key in ParameterKeys)
+                SetParam(p, key, Mathf.Lerp(_transFrom[key], _transTo[key], t));
+            if (t >= 1f) _transTo = null;
+        }
+
+        private static float GetParam(DrivingParameters p, string key) => key switch
+        {
+            "accelerationJerk"    => p.accelerationJerk,
+            "brakingJerk"         => p.brakingJerk,
+            "followDistance"      => p.followDistance,
+            "corneringSpeed"      => p.corneringSpeed,
+            "takeoverProbability" => p.takeoverProbability,
+            "speedBelowLimit"     => p.speedBelowLimit,
+            _                     => 0f
+        };
+
+        private static void SetParam(DrivingParameters p, string key, float v)
+        {
+            switch (key)
+            {
+                case "accelerationJerk":    p.accelerationJerk    = v; break;
+                case "brakingJerk":         p.brakingJerk         = v; break;
+                case "followDistance":      p.followDistance      = v; break;
+                case "corneringSpeed":      p.corneringSpeed      = v; break;
+                case "takeoverProbability": p.takeoverProbability = v; break;
+                case "speedBelowLimit":     p.speedBelowLimit     = v; break;
+            }
+        }
+
+        private static string FormatDict(Dictionary<string, float> d) =>
+            string.Join(", ", d.Select(kv => $"{kv.Key}={kv.Value:F3}"));
+
+        private static float Get(JObject values, string key, float fallback)
+        {
+            var tok = values[key];
+            return tok == null ? fallback : Mathf.Clamp01((float)tok);
+        }
+
+        private void SubmitObjectives()
+        {
+            var objectiveValues = new Dictionary<string, float>();
+            var deviationsForLog = new Dictionary<string, float>();
+            var logCells = new List<string>();
+            foreach (var ch in _objectiveChannels)
+            {
+                var cfg = EffectiveConfig(ch);
+                var (mean, count) = _acc.Mean(ch);
+                float baseline = _baseline[ch];
+                float d;
+                bool clipped;
+
+                if (count == 0)
+                {
+                    Debug.LogWarning($"[Trial] {ch} delivered no samples in window {Iteration} — submitting neutral objective.");
+                    mean = baseline; d = 0f; clipped = false;
+                }
+                else
+                {
+                    d = ChannelMath.Deviation(mean, baseline, cfg.sd, boundK);
+                    clipped = ChannelMath.IsClipped(d);
+                }
+                float objective = ChannelMath.Objective(d, cfg.higherIsBetter, activation);
+
+                objectiveValues[ch.ToString()] = objective;
+                deviationsForLog[ch.ToString()] = d;
+                logCells.Add(F(baseline)); logCells.Add(F(mean)); logCells.Add(F(d));
+                logCells.Add(F(objective)); logCells.Add(clipped ? "1" : "0");
+            }
+
+            Debug.Log($"[Trial] Iteration {Iteration}/{TotalIterations} result — " +
+                      $"params: {{{FormatDict(_lastParams)}}} | " +
+                      $"deviations d (vs. baseline, in bound units): {{{FormatDict(deviationsForLog)}}} | " +
+                      $"objectives sent (minimize): {{{FormatDict(objectiveValues)}}}");
+
+            _bo.SendObjectives(objectiveValues);
+            WriteTrialLogRow(logCells);
+        }
+
+        /// <summary>Questionnaire-mode counterpart to SubmitObjectives() —
+        /// sends the participant's RAW rating straight through, clamped to
+        /// [questionnaireMin, questionnaireMax]. No C#-side normalization:
+        /// mobo.py already does its own, and doing it twice is what broke the
+        /// CSV log earlier (see SendInit's comment).</summary>
+        private void SubmitQuestionnaireObjectives()
+        {
+            var objectiveValues = new Dictionary<string, float>();
+            var logCells = new List<string>();
+            foreach (var key in _questionnaireKeys)
+            {
+                bool has = _pendingQuestionnaireValues.TryGetValue(key, out float raw);
+                if (!has)
+                {
+                    Debug.LogWarning($"[Trial] No questionnaire value received for '{key}' in iteration {Iteration} — submitting the scale midpoint.");
+                    raw = (questionnaireMin + questionnaireMax) * 0.5f;
+                }
+                raw = Mathf.Clamp(raw, questionnaireMin, questionnaireMax);
+                objectiveValues[key] = raw;
+                logCells.Add(F(raw));
+            }
+
+            Debug.Log($"[Trial] Iteration {Iteration}/{TotalIterations} questionnaire result — " +
+                      $"params: {{{FormatDict(_lastParams)}}} | " +
+                      $"raw ratings sent (maximize): {{{FormatDict(objectiveValues)}}}");
+
+            _bo.SendObjectives(objectiveValues);
+            WriteTrialLogRow(logCells);
+        }
+
+        // ── IQuestionnaireOptimizationBridge (per-iteration rating) ─────
+        // This class IS the bridge — it already owns _objectiveChannels/
+        // _questionnaireKeys and the whole state machine, so a separate
+        // adapter would just be a second state machine to keep in sync.
+        bool IQuestionnaireOptimizationBridge.UsesExternalIterationSignal => true;
+        bool IQuestionnaireOptimizationBridge.EnablePriorRatingHints => false;
+        float IQuestionnaireOptimizationBridge.PriorRatingHintAlpha => 0f;
+        string IQuestionnaireOptimizationBridge.UserId => userId;
+        string IQuestionnaireOptimizationBridge.ConditionId => conditionId;
+        string IQuestionnaireOptimizationBridge.GroupId => groupId;
+
+        // StartConditionTrial() already ran mobo.py's real init before the
+        // car ever started driving toward this rating — nothing left to
+        // start here.
+        void IQuestionnaireOptimizationBridge.OptimizationStart() { }
+
+        void IQuestionnaireOptimizationBridge.RequestNextIteration()
+        {
+            if (CurrentPhase != Phase.AwaitingRating) return;
+            SubmitQuestionnaireObjectives();
+            carDriver?.ResumeDriving();
+            CurrentPhase = Phase.WaitingForParameters;
+            _phaseEnd = 0;
+            StatusLine = $"Iteration {Iteration}/{TotalIterations} — submitted, waiting";
+        }
+
+        void IQuestionnaireOptimizationBridge.SubmitQuestionnaireObjectiveValue(string headerName, string rawValue, string sourceName)
+        {
+            if (string.IsNullOrEmpty(headerName)) return;
+
+            if (!float.TryParse(rawValue, NumberStyles.Float, CultureInfo.InvariantCulture, out float v))
+            {
+                Debug.LogWarning($"[Trial] Could not parse questionnaire value '{rawValue}' for '{headerName}' (from '{sourceName}').");
+                return;
+            }
+
+            _pendingQuestionnaireValues[headerName] = v;
+        }
+
+        // Optional prior-rating-hint UX (pre-filling a slider with the last
+        // rating) — not wired yet, safe no-ops.
+        void IQuestionnaireOptimizationBridge.SetPriorSliderRatingHint(string questionKey, float sliderValue) { }
+        bool IQuestionnaireOptimizationBridge.TryGetPriorSliderRatingHint(string questionKey, out float sliderValue)
+        {
+            sliderValue = 0f;
+            return false;
+        }
+        void IQuestionnaireOptimizationBridge.RemovePriorSliderRatingHint(string questionKey) { }
+        void IQuestionnaireOptimizationBridge.SetPriorLinearScaleRatingHint(string questionKey, string answerValue) { }
+        bool IQuestionnaireOptimizationBridge.TryGetPriorLinearScaleRatingHint(string questionKey, out string answerValue)
+        {
+            answerValue = null;
+            return false;
+        }
+        void IQuestionnaireOptimizationBridge.RemovePriorLinearScaleRatingHint(string questionKey) { }
+
+        // ── Per-channel normalization config ────────────────────────────
+        public ChannelNormalization ConfigFor(Channel ch)
+        {
+            foreach (var c in channelConfigs)
+                if (c != null && c.channel == ch) return c;
+            return null;
+        }
+
+        private ChannelNormalization EffectiveConfig(Channel ch)
+        {
+            var c = ConfigFor(ch);
+            if (c != null) return c;
+            return new ChannelNormalization
+            {
+                channel = ch,
+                sd = ChannelMath.DefaultSd(ch),
+                higherIsBetter = ChannelMath.DefaultHigherIsBetter(ch)
+            };
+        }
+
+        public bool TryGetBounds(Channel ch, out float lower, out float upper)
+        {
+            lower = upper = float.NaN;
+            if (!_baseline.TryGetValue(ch, out float b)) return false;
+            var cfg = EffectiveConfig(ch);
+            (lower, upper) = ChannelMath.Bounds(b, cfg.sd, boundK);
+            return true;
+        }
+
+        public ActivationFunction ActivationFn => activation;
+        public IReadOnlyList<Channel> ObjectiveChannels => _objectiveChannels;
+
+        // ── Trial log ───────────────────────────────────────────────────
+        private void OpenTrialLog()
+        {
+            string dir = recorder != null && recorder.IsRecording
+                ? recorder.CurrentSessionPath
+                : Path.Combine(Application.persistentDataPath, "Trials");
+            Directory.CreateDirectory(dir);
+            _trialLog = new StreamWriter(Path.Combine(dir, "trial_log.csv"));
+
+            var header = new StringBuilder("iteration,t_measure_start_s,t_measure_end_s");
+            foreach (var key in ParameterKeys) header.Append(',').Append(key);
+            if (_objectiveSource == ObjectiveSource.Questionnaire)
+                // raw = the participant's submitted rating, native scale
+                // (questionnaireMin..questionnaireMax) — sent to mobo.py as-is.
+                foreach (var key in _questionnaireKeys)
+                    header.Append($",{key}_raw");
+            else
+                foreach (var ch in _objectiveChannels)
+                    // baseline = reference mean; mean = this window's mean;
+                    // d = (mean−baseline)/(k·SD) signed deviation in bound units;
+                    // objective = activation(oriented d) = the minimized value;
+                    // clipped = 1 when |d|>1 (window left the baseline ± k·SD bound).
+                    header.Append($",{ch}_baseline,{ch}_mean,{ch}_d,{ch}_objective,{ch}_clipped");
+            header.Append(",coverage");
+            _trialLog.WriteLine(header.ToString());
+            _trialLog.Flush();
+        }
+
+        private void WriteTrialLogRow(List<string> objectiveCells)
+        {
+            if (_trialLog == null) return;
+            var p = carDriver.parameters;
+            var row = new StringBuilder();
+            row.Append(Iteration).Append(',');
+            row.Append(F(_measureStart - _trialStart)).Append(',');
+            row.Append(F(DelphiClock.Now - _trialStart));
+            foreach (float v in new[] { p.accelerationJerk, p.brakingJerk, p.followDistance,
+                                        p.corneringSpeed, p.takeoverProbability, p.speedBelowLimit })
+                row.Append(',').Append(F(v));
+            foreach (var c in objectiveCells) row.Append(',').Append(c);
+            row.Append(',').Append(float.IsNaN(LastCoverage) ? "NaN" : F(LastCoverage));
+            _trialLog.WriteLine(row.ToString());
+            _trialLog.Flush();
+        }
+
+        private static string F(double v) => v.ToString("F4", CultureInfo.InvariantCulture);
+
+        // ── Trial meta ──────────────────────────────────────────────────
+        private void WriteTrialMeta(string endReason, string sessionPath)
+        {
+            try
+            {
+                int sampling = Mathf.Clamp(_activeConfig.samplingIterations, 1, Math.Max(1, _activeConfig.iterations - 1));
+                double driveElapsed = _driveStart > 0 ? DelphiClock.Now - _driveStart : 0;
+                float avgIterationSeconds = Iteration > 0 ? (float)(driveElapsed / Iteration) : 0f;
+
+                var objectives = new List<TrialObjectiveMeta>();
+                foreach (var ch in _objectiveChannels)
+                {
+                    var sensor = manager.GetSensor(ch);
+                    var cfg = EffectiveConfig(ch);
+                    float baseline = _baseline.TryGetValue(ch, out var b) ? b : float.NaN;
+                    var (lo, hi) = ChannelMath.Bounds(baseline, cfg.sd, boundK);
+                    objectives.Add(new TrialObjectiveMeta
+                    {
+                        channel = ch.ToString(),
+                        sensorType = sensor != null ? sensor.GetType().Name : "(none)",
+                        sensorObjectName = sensor != null ? sensor.gameObject.name : "(none)",
+                        baselineMean = baseline,
+                        literatureSd = cfg.sd,
+                        boundK = boundK,
+                        lowerBound = lo,
+                        upperBound = hi,
+                        higherIsBetter = cfg.higherIsBetter
+                    });
+                }
+
+                var (objLo, objHi) = ChannelMath.ObjectiveRange(activation);
+                var meta = new TrialMeta
+                {
+                    userId = userId, conditionId = conditionId, groupId = groupId,
+                    startedIso = DateTime.Now.AddSeconds(-(DelphiClock.Now - _trialStart)).ToString("o"),
+                    endReason = endReason,
+                    totalDurationSeconds = (float)(DelphiClock.Now - _trialStart),
+
+                    baselineSeconds = _activeConfig.baselineSeconds,
+                    baselineAveragingSeconds = _activeConfig.baselineAveragingSeconds,
+                    windowSeconds = windowSeconds,
+                    washoutSeconds = EffectiveWashoutSeconds,
+                    measureSeconds = MeasureSeconds,
+                    transitionSeconds = transitionSeconds,
+
+                    activation = activation.ToString(),
+                    objectiveRangeLo = objLo,
+                    objectiveRangeHi = objHi,
+
+                    iterationsPlanned = _activeConfig.iterations,
+                    iterationsCompleted = Iteration,
+                    samplingIterationsPlanned = sampling,
+                    optimizationIterationsPlanned = Math.Max(0, _activeConfig.iterations - sampling),
+                    averageIterationSeconds = avgIterationSeconds,
+
+                    finalHypervolumeCoverage = LastCoverage,
+
+                    optimizerSeed = seed,
+                    pythonPathUsed = string.IsNullOrWhiteSpace(pythonPath)
+                        ? Path.GetFullPath(Path.Combine(Application.dataPath, "..", "BOPythonEnv", "bin", "python3"))
+                        : pythonPath,
+
+                    sessionRecordingPath = sessionPath ?? "",
+
+                    goldStandardRateHz = manager != null ? manager.goldStandardRateHz : 0f,
+                    goodAdditionsRateHz = manager != null ? manager.goodAdditionsRateHz : 0f,
+                    experimentalRateHz = manager != null ? manager.experimentalRateHz : 0f,
+
+                    objectives = objectives.ToArray(),
+                    objectiveSource = _objectiveSource.ToString(),
+                    questionnaireObjectiveKeys = _objectiveSource == ObjectiveSource.Questionnaire
+                        ? _questionnaireKeys.ToArray()
+                        : Array.Empty<string>(),
+                    parameterRanges = BuildParameterRanges()
+                };
+
+                string dir = !string.IsNullOrEmpty(sessionPath)
+                    ? sessionPath
+                    : Path.Combine(Application.persistentDataPath, "Trials");
+                Directory.CreateDirectory(dir);
+                File.WriteAllText(Path.Combine(dir, "trial_meta.json"),
+                                  JsonUtility.ToJson(meta, prettyPrint: true));
+                Debug.Log($"[Trial] Wrote trial_meta.json ({Iteration} iterations, " +
+                          $"avg {avgIterationSeconds:F1}s/iteration) → {dir}");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[Trial] Failed to write trial_meta.json: {e.Message}");
+            }
+        }
+
+        private TrialParameterRangeMeta[] BuildParameterRanges()
+        {
+            if (carDriver == null) return Array.Empty<TrialParameterRangeMeta>();
+            var p = carDriver.parameters;
+            var ranges = new[]
+            {
+                new TrialParameterRangeMeta { key = "accelerationJerk", unit = "m/s^3",
+                    physicalMin = p.accelJerkMin, physicalMax = p.accelJerkMax },
+                new TrialParameterRangeMeta { key = "brakingJerk", unit = "m/s^3",
+                    physicalMin = p.brakeJerkMin, physicalMax = p.brakeJerkMax },
+                new TrialParameterRangeMeta { key = "followDistance", unit = "s headway (inverted: 0=far/gentle, 1=close/assertive)",
+                    physicalMin = p.followMax, physicalMax = p.followMin },
+                new TrialParameterRangeMeta { key = "corneringSpeed", unit = "km/h cut in the tightest realistic turn (inverted: 0=cuts a lot/gentle, 1=barely cuts/assertive)",
+                    physicalMin = p.cornerSlowdownMaxKmh, physicalMax = p.cornerSlowdownMinKmh },
+                new TrialParameterRangeMeta { key = "takeoverProbability", unit = "probability",
+                    physicalMin = 0f, physicalMax = 1f },
+                new TrialParameterRangeMeta { key = "speedBelowLimit", unit = "km/h below posted limit (inverted: 0=big margin/gentle, 1=at limit/assertive)",
+                    physicalMin = p.belowLimitMaxKmh, physicalMax = p.belowLimitMinKmh },
+            };
+            foreach (var r in ranges) r.active = _activeParamKeys.Contains(r.key);
+            return ranges;
+        }
+
+        // ── Helpers / teardown ──────────────────────────────────────────
+        /// <summary>Channels eligible as Physiology objectives: attached AND
+        /// enabled on DelphiManager.</summary>
+        public List<Channel> CandidateChannels()
+        {
+            var list = new List<Channel>();
+            if (manager == null) return list;
+            foreach (var ch in DelphiManager.AllChannels)
+            {
+                var status = manager.GetStatus(ch);
+                if (status == ChannelStatus.NotAttached || status == ChannelStatus.Disabled) continue;
+                list.Add(ch);
+            }
+            return list;
+        }
+
+        /// <summary>Launches mobo.py proactively, ahead of actually needing
+        /// it — called at Awake() (the moment Play starts) and again right
+        /// after every condition finishes/aborts/fails, so there's always a
+        /// process already booting or connected by the time a condition
+        /// needs one. No-ops if one is already alive. mobo.py itself is
+        /// one-run-per-process (see the class doc comment), so this is what
+        /// "always available" actually means in practice — never launched
+        /// lazily at trial-start, never left cold between conditions.</summary>
+        private void PrewarmOptimizer()
+        {
+            if (_bo != null) return;
+            try
+            {
+                _bo = new BoBridge();
+                _bo.StartProcess(pythonPath,
+                    Path.Combine(Application.streamingAssetsPath, "BOData", "BayesianOptimization"),
+                    "mobo.py");
+                _lastBoLaunchError = null;
+                Debug.Log("[Trial] Optimizer process launched.");
+            }
+            catch (Exception e)
+            {
+                _bo?.Dispose();
+                _bo = null;
+                _lastBoLaunchError = e.Message;
+                Debug.LogWarning($"[Trial] Could not launch the optimizer yet: {e.Message} — will retry when a condition starts.");
+            }
+        }
+
+        private void Cleanup(string endReason = "Interrupted")
+        {
+            if (manager != null && manager.Core != null) manager.Core.Accumulator = null;
+            _acc = null;
+            _transTo = null;
+            _bo?.Dispose();
+            _bo = null;
+            _trialLog?.Close();
+            _trialLog = null;
+            _freePlayLog?.Close(); // defensive — normally EndFreePlay() already closed this
+            _freePlayLog = null;
+
+            string sessionPath = recorder != null ? recorder.CurrentSessionPath : null;
+            if (recorder != null && recorder.IsRecording) recorder.StopRecording();
+
+            if (_trialActuallyStarted) WriteTrialMeta(endReason, sessionPath);
+            _trialActuallyStarted = false;
+        }
+
+        private void OnDestroy() => Cleanup();
+        private void OnApplicationQuit() => Cleanup();
 
         // ── Read helpers for the researcher UI ──────────────────────────
-        /// <summary>The condition kind in main-condition slot 0 or 1, honouring
-        /// the counterbalanced order.</summary>
         public ConditionKind ConditionKindAt(int slot)
         {
             ConditionKind second = firstCondition == ConditionKind.Implicit
@@ -410,43 +1452,33 @@ namespace Delphi.Session
             return slot == 0 ? firstCondition : second;
         }
 
-        /// <summary>Rough wall-clock length of ONE condition: baseline + all
-        /// iteration windows. Same for both (identical trial config).</summary>
-        public float EstimatedConditionSeconds()
+        /// <summary>Rough wall-clock length of ONE condition of this kind:
+        /// baseline + all iteration windows.</summary>
+        public float EstimatedConditionSeconds(ConditionKind kind)
         {
-            if (trial == null) return 0f;
-            float window = trial.windowStrategy != null ? trial.windowStrategy.WindowSeconds : 0f;
-            return trial.baselineSeconds + trial.iterations * window;
+            var cfg = kind == ConditionKind.Implicit ? implicitTrial : explicitTrial;
+            return cfg.baselineSeconds + cfg.iterations * windowSeconds;
         }
 
-        /// <summary>Estimated seconds left in the condition currently running
-        /// (0 outside a condition): the current trial phase's remainder plus the
-        /// windows not yet started.</summary>
         public float CurrentConditionSecondsRemaining()
         {
-            if (trial == null || CurrentPhase != Phase.Condition) return 0f;
-            float window = trial.windowStrategy != null ? trial.windowStrategy.WindowSeconds : 0f;
-            int itersLeft = Mathf.Max(0, trial.TotalIterations - trial.Iteration);
-            return (float)trial.PhaseSecondsRemaining + itersLeft * window;
+            if (_activeConfig == null || !IsRunningCondition) return 0f;
+            int itersLeft = Mathf.Max(0, TotalIterations - Iteration);
+            return (float)PhaseSecondsRemaining + itersLeft * windowSeconds;
         }
 
-        /// <summary>Iteration progress of the running condition (0..1), or 0.</summary>
         public float CurrentConditionProgress()
         {
-            if (trial == null || CurrentPhase != Phase.Condition || trial.TotalIterations <= 0)
-                return 0f;
-            return Mathf.Clamp01(trial.Iteration / (float)trial.TotalIterations);
+            if (_activeConfig == null || !IsRunningCondition || TotalIterations <= 0) return 0f;
+            return Mathf.Clamp01(Iteration / (float)TotalIterations);
         }
 
-        /// <summary>Which main-condition slot (0/1) is running/last-run, so the UI
-        /// can mark the per-condition rows done / active / pending.</summary>
         public int ActiveConditionSlot => Mathf.Clamp(ConditionNumber - 1, -1, 1);
 
         // ── Debug (context menu) ────────────────────────────────────────
         [ContextMenu("Start Session")] private void CtxStart() => StartSession();
         [ContextMenu("Emergency Stop")] private void CtxStop() => EmergencyStop();
 
-        /// <summary>One-line human summary for the researcher UI / logs.</summary>
         public string Describe()
         {
             var sb = new StringBuilder();

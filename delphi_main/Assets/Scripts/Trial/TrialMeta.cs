@@ -24,7 +24,7 @@ namespace Delphi.Trial
         public float washoutSeconds;
         public float measureSeconds;
         /// <summary>Configured ramp time toward each new parameter set; the
-        /// ACTUAL ramp used was min(this, washoutSeconds) — see TrialManager.</summary>
+        /// ACTUAL ramp used was min(this, washoutSeconds) — see SessionController.</summary>
         public float transitionSeconds;
 
         /// <summary>Shared activation shaping every channel's deviation into the
@@ -55,7 +55,18 @@ namespace Delphi.Trial
         /// the acquisition rate behind every objective below.</summary>
         public float goldStandardRateHz, goodAdditionsRateHz, experimentalRateHz;
 
+        /// <summary>Sensor-shaped objectives (Physiology trials) — empty for
+        /// Questionnaire trials, which use questionnaireObjectiveKeys below
+        /// instead. Neither concept fits the other cleanly enough to share
+        /// one array.</summary>
         public TrialObjectiveMeta[] objectives;
+        /// <summary>Which objectiveSource this trial ran with — "Physiology"
+        /// or "Questionnaire".</summary>
+        public string objectiveSource;
+        /// <summary>Questionnaire trials only: the header names (from the
+        /// linked QTQuestionnaireManager) that were sent to the optimizer as
+        /// objectives, in order — empty for Physiology trials.</summary>
+        public string[] questionnaireObjectiveKeys;
         public TrialParameterRangeMeta[] parameterRanges;
     }
 
