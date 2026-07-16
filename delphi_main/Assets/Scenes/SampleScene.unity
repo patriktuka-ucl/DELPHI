@@ -217,53 +217,6 @@ MonoBehaviour:
   endS: 40.2
   waitDuration: 3
   limitKmh: 30
---- !u!1 &372333635
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 372333637}
-  - component: {fileID: 372333636}
-  m_Layer: 0
-  m_Name: MockSensor_Frame
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &372333636
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 372333635}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d28da4072e314416e923f71a1b85c103, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Delphi.MockSensor_Frame
-  clip: {fileID: 32900000, guid: b93ff057d7fd84a02ae9f01402a48d06, type: 3}
-  fallbackWidth: 640
-  fallbackHeight: 360
---- !u!4 &372333637
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 372333635}
-  serializedVersion: 2
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 989.62524, y: 0.00003, z: 101.95235}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 1037761337}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &500385126
 GameObject:
   m_ObjectHideFlags: 0
@@ -1072,8 +1025,9 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 824068708}
-  - {fileID: 372333637}
   - {fileID: 1647533178}
+  - {fileID: 1319649829}
+  - {fileID: 1630552710}
   - {fileID: 1531519422}
   - {fileID: 988303696}
   - {fileID: 1425785810}
@@ -1266,6 +1220,51 @@ Camera:
   m_OcclusionCulling: 1
   m_StereoConvergence: 10
   m_StereoSeparation: 0.022
+--- !u!1 &1319649828
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1319649829}
+  - component: {fileID: 1319649830}
+  m_Layer: 0
+  m_Name: Polar_HR
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1319649829
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1319649828}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 77.61197, y: 0, z: -32.46696}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1037761337}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1319649830
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1319649828}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2267c839ad7bc48d0bc889968aa12b3a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.PolarH10ChannelReader
+  channel: 0
 --- !u!1 &1425785808
 GameObject:
   m_ObjectHideFlags: 0
@@ -1313,6 +1312,56 @@ MonoBehaviour:
   deviceName: my_webcam
   requestedWidth: 1280
   requestedHeight: 720
+--- !u!1 &1472681597
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1472681599}
+  - component: {fileID: 1472681598}
+  m_Layer: 0
+  m_Name: PolarH10OscConnection
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1472681598
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1472681597}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7f137f5e6c47a488987515fa1d33e345, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.PolarH10OscConnection
+  listenPort: 9500
+  hrAddress: /PolarH10/HR
+  rrAddress: /PolarH10/RR
+  logParseErrors: 1
+  rrHistorySize: 12
+  autoStartPythonScript: 1
+--- !u!4 &1472681599
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1472681597}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 77.61197, y: 0, z: -29.03726}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1531519420
 GameObject:
   m_ObjectHideFlags: 0
@@ -1394,6 +1443,51 @@ Transform:
   - {fileID: 977851524}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1630552709
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1630552710}
+  - component: {fileID: 1630552711}
+  m_Layer: 0
+  m_Name: Polar_HRV_MRSSD
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1630552710
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1630552709}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 77.61197, y: 0, z: -32.46696}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1037761337}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1630552711
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1630552709}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2267c839ad7bc48d0bc889968aa12b3a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.PolarH10ChannelReader
+  channel: 1
 --- !u!1 &1647533176
 GameObject:
   m_ObjectHideFlags: 0
@@ -1471,24 +1565,24 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::DELPHI_Manager
   goldStandardRateHz: 60
   heartRateOn: 1
-  heartRate: {fileID: 824068707}
+  heartRate: {fileID: 1319649830}
   hrvRmssdOn: 1
-  hrvRmssd: {fileID: 900000005}
+  hrvRmssd: {fileID: 1630552711}
   respRateOn: 1
   respRate: {fileID: 0}
   gsrOn: 1
   gsr: {fileID: 900000002}
   goodAdditionsRateHz: 60
-  blinkRateOn: 1
+  blinkRateOn: 0
   blinkRate: {fileID: 0}
-  gazeOn: 1
+  gazeOn: 0
   gaze: {fileID: 0}
-  pupilDiameterOn: 1
+  pupilDiameterOn: 0
   pupilDiameter: {fileID: 0}
   experimentalRateHz: 60
-  eegOn: 1
+  eegOn: 0
   eeg: {fileID: 0}
-  facialOn: 1
+  facialOn: 0
   facial: {fileID: 0}
   webcamOn: 1
   webcam: {fileID: 1425785811}
@@ -2007,3 +2101,4 @@ SceneRoots:
   - {fileID: 1745511444}
   - {fileID: 900000011}
   - {fileID: 2115074266}
+  - {fileID: 1472681599}
