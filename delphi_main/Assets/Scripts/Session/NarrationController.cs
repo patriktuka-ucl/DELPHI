@@ -39,7 +39,11 @@ namespace Delphi.Session
             FreePlayIntro,      // hand-over to manual slider control
             Finished,           // whole session complete — the in-person interview happens after this, outside the app
             EmergencyStop,      // safety halt
-            ResumeAfterStop     // re-intro after an emergency stop
+            ResumeAfterStop,    // re-intro after an emergency stop
+            IntroFreeRoam       // framing before the FreeRoam condition
+            // NOTE: append new lines at the END only. The Inspector's clips[]
+            // stores each entry's enum VALUE, so inserting in the middle
+            // silently re-points already-wired clips at the wrong lines.
         }
 
         [Serializable]

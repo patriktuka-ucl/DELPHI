@@ -115,12 +115,13 @@ namespace Delphi
         //  SESSION CARD
         // ════════════════════════════════════════════════════════════════
         private GameObject _preGroup, _liveGroup;
-        private Image _firstImplImg, _firstExplImg, _freePlayImg, _startImg;
-        private Text _freePlayTxt;
-        private InputField _userIdField, _groupIdField;
+        private Image _startImg;
+        private Image[] _orderImg = new Image[SessionController.OrderCount];
+        private Text _orderPreviewTxt;
+        private InputField _userIdField;
         private Text _phaseTxt, _statusTxt, _headerStatus;
-        private Text[] _condLabel = new Text[2];
-        private Text[] _condTime  = new Text[2];
+        private Text[] _condLabel = new Text[3];
+        private Text[] _condTime  = new Text[3];
         private Slider _condBar;
         private Button _qDoneBtn, _breakBtn, _continueBtn, _resumeBreakBtn,
                        _endFreePlayBtn, _estopBtn, _estopResumeBtn;
@@ -142,11 +143,12 @@ namespace Delphi
 
             if (idle)
             {
-                var f = session.firstCondition;
-                _firstImplImg.color = f == SessionController.ConditionKind.Implicit ? _btnSel : _btn;
-                _firstExplImg.color = f == SessionController.ConditionKind.Explicit ? _btnSel : _btn;
-                _freePlayImg.color = session.includeFreePlay ? _btnSel : _btn;
-                _freePlayTxt.text = session.includeFreePlay ? "Free-play: ON" : "Free-play: OFF";
+                for (int i = 0; i < _orderImg.Length; i++)
+                    _orderImg[i].color = session.orderIndex == i + 1 ? _btnSel : _btn;
+                // Spell the picked order out — the number alone is easy to
+                // mis-set, and this is the one setting that can't be corrected
+                // after the session starts.
+                _orderPreviewTxt.text = SessionController.DescribeOrder(session.orderIndex);
             }
             else
             {
@@ -157,16 +159,23 @@ namespace Delphi
                 _statusTxt.text = session.StatusLine + (pr > 0 ? $"   {Mmss((float)pr)} left" : "");
 
                 int activeSlot = session.ActiveConditionSlot;
-                for (int s = 0; s < 2; s++)
+                bool roaming = phase == SessionController.Phase.FreePlay;
+                for (int s = 0; s < _condLabel.Length; s++)
                 {
-                    _condLabel[s].text = $"Cond {s + 1}: {session.ConditionKindAt(s)}";
-                    bool isActive = s == activeSlot && session.IsRunningCondition;
+                    var kind = session.ConditionKindAt(s);
+                    _condLabel[s].text = $"Cond {s + 1}: {kind}";
+                    // FreeRoam is open-ended, so it counts as "running" while
+                    // the roam phase is live — IsRunningCondition only covers
+                    // the BO baseline/iteration loop, which FreeRoam has none of.
+                    bool isActive = s == activeSlot && (session.IsRunningCondition || roaming);
                     bool isDone = session.ConditionNumber > s + 1 ||
-                                  (session.ConditionNumber == s + 1 && !session.IsRunningCondition);
+                                  (session.ConditionNumber == s + 1 && !session.IsRunningCondition && !roaming);
                     if (isActive)
                     {
                         _condLabel[s].color = _condTime[s].color = _running;
-                        _condTime[s].text = $"running · ~{Mmss(session.CurrentConditionSecondsRemaining())} left";
+                        _condTime[s].text = kind == SessionController.ConditionKind.FreeRoam
+                            ? "running · open-ended"
+                            : $"running · ~{Mmss(session.CurrentConditionSecondsRemaining())} left";
                     }
                     else if (isDone)
                     {
@@ -176,13 +185,20 @@ namespace Delphi
                     else
                     {
                         _condLabel[s].color = _condTime[s].color = _pending;
-                        _condTime[s].text = $"pending · ~{Mmss(session.EstimatedConditionSeconds(session.ConditionKindAt(s)))}";
+                        _condTime[s].text = kind == SessionController.ConditionKind.FreeRoam
+                            ? "pending · open-ended"
+                            : $"pending · ~{Mmss(session.EstimatedConditionSeconds(kind))}";
                     }
                 }
                 _condBar.value = session.CurrentConditionProgress();
             }
 
-            Show(_qDoneBtn, phase == SessionController.Phase.Questionnaire);
+            // Normally the PARTICIPANT ends the post-condition questionnaire —
+            // its onQuestionnaireFinished advances the session on its own. This
+            // button is only the fallback for when no questionnaire is linked
+            // (SessionController sets IsAwaitingResearcher in exactly that
+            // case), so the researcher isn't left with no way forward.
+            Show(_qDoneBtn, phase == SessionController.Phase.Questionnaire && session.IsAwaitingResearcher);
             Show(_breakBtn, phase == SessionController.Phase.BreakOffer && !session.AwaitingBreakResume);
             Show(_continueBtn, phase == SessionController.Phase.BreakOffer && !session.AwaitingBreakResume);
             Show(_resumeBreakBtn, phase == SessionController.Phase.BreakOffer && session.AwaitingBreakResume);
@@ -373,8 +389,40 @@ namespace Delphi
         private void ToggleLoad() { if (player == null) return; if (player.IsLoaded) { player.Unload(); return; } RefreshSessions(); if (_sessions.Length > 0) player.Load(_sessions[_sessionIdx]); }
         private void CycleSpeed(int d) { if (player == null) return; _speedIdx = Mathf.Clamp(_speedIdx + d, 0, Speeds.Length - 1); player.SetSpeed(Speeds[_speedIdx]); }
 
+        // Ending a session is unrecoverable, and this button sits on a rig
+        // next to the recording controls — so it arms on the first click and
+        // only quits on a second one within the window, rather than acting on
+        // a stray click mid-condition.
+        private const string QuitIdleLabel = "QUIT & SAVE";
+        private const float QuitArmSeconds = 4f;
+        private Image _quitImg;
+        private Text _quitTxt;
+        private float _quitArmedUntil;
+
+        private void OnQuitClicked()
+        {
+            if (Time.unscaledTime < _quitArmedUntil)
+            {
+                _quitArmedUntil = 0f;
+                Log("Quitting — finalising recordings, this may take a few seconds…");
+                if (session != null) session.QuitSession();
+                else if (recorder != null && recorder.IsRecording) recorder.StopRecording();
+                return;
+            }
+            _quitArmedUntil = Time.unscaledTime + QuitArmSeconds;
+        }
+
+        private void RefreshQuitButton()
+        {
+            if (_quitTxt == null || _quitImg == null) return;
+            bool armed = Time.unscaledTime < _quitArmedUntil;
+            _quitTxt.text = armed ? "CONFIRM QUIT?" : QuitIdleLabel;
+            _quitImg.color = armed ? _estop : _btn;
+        }
+
         private void RefreshTransport()
         {
+            RefreshQuitButton();
             bool rec = recorder != null && recorder.IsRecording;
             if (_wasRecording && !rec) { RefreshSessions(); Log("Recording stopped"); }
             if (!_wasRecording && rec) Log("Recording started");
@@ -495,26 +543,30 @@ namespace Delphi
             var host = card.transform;
 
             _preGroup = Empty(host, "pre");
-            Txt(_preGroup.transform, "First condition", 13, _dim, new Vector2(16, -34), new Vector2(160, 20));
-            _firstImplImg = Btn(_preGroup.transform, "Implicit", new Vector2(150, -32), new Vector2(140, 26),
-                () => session.firstCondition = SessionController.ConditionKind.Implicit, out _);
-            _firstExplImg = Btn(_preGroup.transform, "Explicit", new Vector2(298, -32), new Vector2(140, 26),
-                () => session.firstCondition = SessionController.ConditionKind.Explicit, out _);
 
-            // Participant/group identifiers — set per session here, not in the
+            // Counterbalancing order 1-6: one button per permutation of the
+            // three conditions. This IS the group assignment — it's recorded
+            // as GroupID in every CSV — so it's a switch rather than a typed
+            // field: a typo in a free-text group box would silently mislabel
+            // the whole session's data.
+            Txt(_preGroup.transform, "Counterbalancing order", 13, _dim, new Vector2(16, -34), new Vector2(200, 20));
+            for (int i = 0; i < SessionController.OrderCount; i++)
+            {
+                int order = i + 1; // capture per-iteration, not the loop variable
+                _orderImg[i] = Btn(_preGroup.transform, order.ToString(),
+                    new Vector2(212 + i * 39, -32), new Vector2(35, 26),
+                    () => session.orderIndex = order, out _);
+            }
+            _orderPreviewTxt = Txt(_preGroup.transform, "", 12, _accent, new Vector2(16, -58), new Vector2(422, 18));
+
+            // Participant identifier — set per session here, not in the
             // Inspector (up to ~30 participants; a fixed Inspector value would
             // mean re-editing the prefab/scene between every run).
-            Txt(_preGroup.transform, "Participant ID", 13, _dim, new Vector2(16, -70), new Vector2(110, 20));
-            _userIdField = Field(_preGroup.transform, new Vector2(132, -68), new Vector2(140, 26), "P01");
+            Txt(_preGroup.transform, "Participant ID", 13, _dim, new Vector2(16, -86), new Vector2(110, 20));
+            _userIdField = Field(_preGroup.transform, new Vector2(132, -84), new Vector2(140, 26), "P01");
             _userIdField.text = session.userId;
             _userIdField.onValueChanged.AddListener(v => session.userId = v);
-            Txt(_preGroup.transform, "Group", 13, _dim, new Vector2(282, -70), new Vector2(46, 20));
-            _groupIdField = Field(_preGroup.transform, new Vector2(332, -68), new Vector2(90, 26), "0");
-            _groupIdField.text = session.groupId;
-            _groupIdField.onValueChanged.AddListener(v => session.groupId = v);
 
-            _freePlayImg = Btn(_preGroup.transform, "Free-play: ON", new Vector2(16, -108), new Vector2(220, 26),
-                () => session.includeFreePlay = !session.includeFreePlay, out _freePlayTxt);
             _startImg = Btn(_preGroup.transform, "START SESSION", new Vector2(16, -148), new Vector2(422, 48),
                 () => session.StartSession(), out _);
             _startImg.color = _btnSel;
@@ -522,14 +574,14 @@ namespace Delphi
             _liveGroup = Empty(host, "live");
             _phaseTxt = Txt(_liveGroup.transform, "—", 20, _running, new Vector2(16, -34), new Vector2(422, 26)); _phaseTxt.fontStyle = FontStyle.Bold;
             _statusTxt = Txt(_liveGroup.transform, "", 13, _dim, new Vector2(16, -60), new Vector2(422, 32));
-            for (int i = 0; i < 2; i++)
+            for (int i = 0; i < _condLabel.Length; i++)
             {
-                float y = -98 - i * 24;
+                float y = -96 - i * 23; // 3 rows now — tightened to clear the bar below
                 _condLabel[i] = Txt(_liveGroup.transform, $"Cond {i + 1}", 14, _pending, new Vector2(16, y), new Vector2(200, 22));
                 _condTime[i] = Txt(_liveGroup.transform, "", 13, _pending, new Vector2(210, y), new Vector2(228, 22));
                 _condTime[i].alignment = TextAnchor.UpperRight;
             }
-            _condBar = Bar(_liveGroup.transform, new Vector2(16, -150), new Vector2(422, 10), _accent);
+            _condBar = Bar(_liveGroup.transform, new Vector2(16, -166), new Vector2(422, 10), _accent);
 
             // Contextual buttons (shared row ~ -176)
             var wide = new Vector2(422, 38); var pos = new Vector2(16, -178);
@@ -624,6 +676,8 @@ namespace Delphi
             _recImg = Btn(host, "REC", new Vector2(16, -12), new Vector2(84, 32), ToggleRecord, out _recTxt);
             _nameField = Field(host, new Vector2(108, -12), new Vector2(260, 32), "Session name (optional)");
             _recStatus = Txt(host, "idle", 15, _dim, new Vector2(380, -14), new Vector2(360, 28));
+            _quitImg = Btn(host, QuitIdleLabel, new Vector2(756, -12), new Vector2(180, 32),
+                           OnQuitClicked, out _quitTxt);
 
             float y = -52;
             Btn(host, "<", new Vector2(16, y), new Vector2(32, 32), () => CycleSession(-1), out _);

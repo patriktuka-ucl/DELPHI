@@ -50,7 +50,8 @@ namespace Delphi
         [Header("Output")]
         [Tooltip("Empty = {persistentDataPath}/Sessions")]
         public string sessionsFolder = "";
-        [Tooltip("Empty = auto-detect ffmpeg in the usual macOS locations.")]
+        [Tooltip("Empty = auto-detect ffmpeg in the usual install locations, " +
+                 "then on PATH.")]
         public string ffmpegPath = "";
         [Tooltip("GPU readbacks arrive top-down on Metal/DX, so frames need " +
                  "a vertical flip before encoding. Untick only if recordings " +
@@ -90,7 +91,12 @@ namespace Delphi
 
         private static readonly string[] FfmpegCandidates =
         {
-            "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"
+            // macOS/Linux
+            "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg",
+            // Windows: winget/scoop/chocolatey defaults
+            @"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
+            @"C:\ffmpeg\bin\ffmpeg.exe",
+            @"C:\ProgramData\chocolatey\bin\ffmpeg.exe"
         };
 
         private void Awake()
@@ -128,8 +134,19 @@ namespace Delphi
             string ffmpeg = ResolveFfmpeg();
             if (ffmpeg == null)
             {
-                Debug.LogError("[SessionRecorder] ffmpeg not found — install it (brew " +
-                               "install ffmpeg) or set ffmpegPath explicitly.");
+                Debug.LogError("[SessionRecorder] ffmpeg not found on PATH or in the " +
+                               "usual install locations — install it (Windows: winget " +
+                               "install Gyan.FFmpeg; macOS: brew install ffmpeg) or set " +
+                               "ffmpegPath explicitly.");
+                return false;
+            }
+
+            string root = ResolveWritableSessionsRoot();
+            if (root == null)
+            {
+                Debug.LogError($"[SessionRecorder] Can't write to the sessions folder " +
+                               $"('{SessionsRoot}') or to the fallback ('{DefaultSessionsRoot}'). " +
+                               "Set a writable sessionsFolder on the SessionRecorder.");
                 return false;
             }
 
@@ -137,10 +154,19 @@ namespace Delphi
             string folderName = string.IsNullOrWhiteSpace(sessionName)
                 ? timestamp
                 : SanitizeFolderName(sessionName);
-            _sessionPath = Path.Combine(SessionsRoot, folderName);
+            _sessionPath = Path.Combine(root, folderName);
             if (Directory.Exists(_sessionPath))
-                _sessionPath = Path.Combine(SessionsRoot, $"{folderName}_{timestamp}");
-            Directory.CreateDirectory(_sessionPath);
+                _sessionPath = Path.Combine(root, $"{folderName}_{timestamp}");
+
+            try
+            {
+                Directory.CreateDirectory(_sessionPath);
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[SessionRecorder] Could not create '{_sessionPath}': {e.Message}");
+                return false;
+            }
 
             // One feed per frame channel that is actually delivering pixels.
             _feeds.Clear();
@@ -333,12 +359,95 @@ namespace Delphi
             return name;
         }
 
+        /// <summary>The configured sessions folder if it's actually usable on
+        /// THIS machine, otherwise the platform default. A sessionsFolder saved
+        /// on another OS doesn't fail loudly — an absolute POSIX path like
+        /// "/Users/someone/Desktop" gets silently re-rooted onto the current
+        /// drive on Windows ("C:\Users\someone\Desktop") and only blows up at
+        /// CreateDirectory. That used to throw partway through starting a
+        /// condition, which loses the participant's run; recording into the
+        /// default folder with a warning is always the better trade.</summary>
+        private string ResolveWritableSessionsRoot()
+        {
+            string configured = SessionsRoot;
+            if (TryEnsureDirectory(configured)) return configured;
+
+            string fallback = DefaultSessionsRoot;
+            Debug.LogWarning($"[SessionRecorder] sessionsFolder '{sessionsFolder}' isn't writable on " +
+                             $"this machine (a path saved on another OS?) — recording to '{fallback}' " +
+                             "instead. Set a valid sessionsFolder on the SessionRecorder to silence this.");
+            return TryEnsureDirectory(fallback) ? fallback : null;
+        }
+
+        private static bool TryEnsureDirectory(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+            try
+            {
+                Directory.CreateDirectory(path);
+                return true;
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException
+                                   || e is ArgumentException || e is NotSupportedException)
+            {
+                return false;
+            }
+        }
+
         private string ResolveFfmpeg()
         {
             if (!string.IsNullOrEmpty(ffmpegPath))
                 return File.Exists(ffmpegPath) ? ffmpegPath : null;
             foreach (var p in FfmpegCandidates)
                 if (File.Exists(p)) return p;
+
+            // Scoop/winget shims and any manual install land on PATH rather
+            // than a fixed prefix, so fall back to walking it.
+            string exe = Application.platform == RuntimePlatform.WindowsEditor
+                      || Application.platform == RuntimePlatform.WindowsPlayer
+                       ? "ffmpeg.exe" : "ffmpeg";
+            string pathVar = Environment.GetEnvironmentVariable("PATH") ?? "";
+            foreach (var dir in pathVar.Split(Path.PathSeparator))
+            {
+                if (string.IsNullOrWhiteSpace(dir)) continue;
+                string candidate;
+                try { candidate = Path.Combine(dir.Trim(), exe); }
+                catch (ArgumentException) { continue; } // malformed PATH entry
+                if (File.Exists(candidate)) return candidate;
+            }
+
+            return ResolveWingetFfmpeg(exe);
+        }
+
+        /// <summary>winget installs ffmpeg under a VERSION-STAMPED folder and
+        /// only puts it on the user PATH — which an already-running Editor
+        /// won't have inherited. Search the package tree so a fresh install
+        /// works without restarting Unity, and survives version bumps.</summary>
+        private static string ResolveWingetFfmpeg(string exe)
+        {
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (string.IsNullOrEmpty(localAppData)) return null;
+
+            string packages = Path.Combine(localAppData, "Microsoft", "WinGet", "Packages");
+            if (!Directory.Exists(packages)) return null;
+
+            try
+            {
+                // Only descend into ffmpeg packages — the full tree can be large.
+                foreach (var pkgDir in Directory.GetDirectories(packages, "*FFmpeg*"))
+                {
+                    var hits = Directory.GetFiles(pkgDir, exe, SearchOption.AllDirectories);
+                    if (hits.Length > 0)
+                    {
+                        Array.Sort(hits, StringComparer.OrdinalIgnoreCase);
+                        return hits[hits.Length - 1]; // highest version folder
+                    }
+                }
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                // Unreadable package dir — treat as "not found".
+            }
             return null;
         }
     }

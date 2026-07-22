@@ -43,20 +43,37 @@ namespace Delphi.Trial
         public bool Connected => _tcp != null && _tcp.Connected;
 
         // ── Process ─────────────────────────────────────────────────────
+        /// <summary>The project-local venv interpreter next to Assets. venv
+        /// lays itself out as Scripts/python.exe on Windows and bin/python3
+        /// everywhere else.</summary>
+        public static string DefaultPythonPath
+        {
+            get
+            {
+                bool isWindows =
+                    UnityEngine.Application.platform == UnityEngine.RuntimePlatform.WindowsEditor
+                 || UnityEngine.Application.platform == UnityEngine.RuntimePlatform.WindowsPlayer;
+                return Path.GetFullPath(Path.Combine(
+                    UnityEngine.Application.dataPath, "..", "BOPythonEnv",
+                    isWindows ? "Scripts" : "bin",
+                    isWindows ? "python.exe" : "python3"));
+            }
+        }
+
         /// <summary>Launch mobo.py. `pythonPath` empty → the project-local
-        /// venv (BOPythonEnv/bin/python3 next to Assets).</summary>
+        /// venv (see <see cref="DefaultPythonPath"/>).</summary>
         public void StartProcess(string pythonPath, string scriptDir, string scriptName)
         {
             if (string.IsNullOrWhiteSpace(pythonPath))
-                pythonPath = Path.GetFullPath(Path.Combine(
-                    UnityEngine.Application.dataPath, "..", "BOPythonEnv", "bin", "python3"));
+                pythonPath = DefaultPythonPath;
 
             if (!File.Exists(pythonPath))
                 throw new FileNotFoundException(
                     $"Python not found at '{pythonPath}'. Create the venv " +
-                    "(python3.13 -m venv BOPythonEnv && BOPythonEnv/bin/pip install -r " +
-                    "Assets/StreamingAssets/BOData/Installation/requirements.txt) " +
-                    "or set the path on the SessionController.", pythonPath);
+                    "(py -3.13 -m venv BOPythonEnv && BOPythonEnv\\Scripts\\pip install -r " +
+                    "Assets/StreamingAssets/BOData/Installation/requirements.txt — on " +
+                    "macOS/Linux: python3.13 -m venv BOPythonEnv && BOPythonEnv/bin/pip " +
+                    "install -r ...) or set the path on the SessionController.", pythonPath);
 
             string script = Path.Combine(scriptDir, scriptName);
             if (!File.Exists(script))

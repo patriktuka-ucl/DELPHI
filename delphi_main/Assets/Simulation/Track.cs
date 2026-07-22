@@ -443,6 +443,18 @@ namespace Delphi.Simulation
             return false;
         }
 
+        /// <summary>The next Park marker at or ahead of arc-length s. This is
+        /// what makes several parks on one track work: the car can only ever
+        /// drive forwards, so "park now" has to mean the next one it will
+        /// actually reach, not always the first on the track.</summary>
+        public bool TryGetParkAhead(float s, out TrackEvent park)
+        {
+            for (int i = 0; i < _parks.Count; i++)      // _parks is sorted by S
+                if (_parks[i].S >= s) { park = _parks[i]; return true; }
+            park = null;
+            return false;
+        }
+
         // ── Debug visualisation (Scene view only, before pressing Play) ──
         private void OnDrawGizmos()
         {

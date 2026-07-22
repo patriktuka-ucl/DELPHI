@@ -1,0 +1,92 @@
+# Line endings ------------------------------------------------------
+# The repo is worked on from both macOS and Windows. Unity rewrites its
+# YAML assets with LF regardless of platform, so pinning LF here stops
+# core.autocrlf=true on Windows from marking untouched scenes/prefabs as
+# modified (and from turning every merge into a whole-file conflict).
+
+* text=auto eol=lf
+
+# Unity YAML — must stay LF and must use Unity's merge tool, never a
+# line-based 3-way merge.
+*.unity      text eol=lf merge=unityyamlmerge diff
+*.prefab     text eol=lf merge=unityyamlmerge diff
+*.asset      text eol=lf merge=unityyamlmerge diff
+*.meta       text eol=lf merge=unityyamlmerge diff
+*.mat        text eol=lf merge=unityyamlmerge diff
+*.anim       text eol=lf merge=unityyamlmerge diff
+*.controller text eol=lf merge=unityyamlmerge diff
+*.overrideController text eol=lf merge=unityyamlmerge diff
+*.physicMaterial     text eol=lf merge=unityyamlmerge diff
+*.physicsMaterial2D  text eol=lf merge=unityyamlmerge diff
+*.playable   text eol=lf merge=unityyamlmerge diff
+*.mixer      text eol=lf merge=unityyamlmerge diff
+*.renderTexture text eol=lf merge=unityyamlmerge diff
+*.terrainlayer  text eol=lf merge=unityyamlmerge diff
+*.spriteatlas   text eol=lf merge=unityyamlmerge diff
+*.guiskin    text eol=lf merge=unityyamlmerge diff
+*.flare      text eol=lf merge=unityyamlmerge diff
+*.fontsettings  text eol=lf merge=unityyamlmerge diff
+*.lighting   text eol=lf merge=unityyamlmerge diff
+*.shadervariants text eol=lf merge=unityyamlmerge diff
+
+# Source / config
+*.cs      text eol=lf diff=csharp
+*.py      text eol=lf diff=python
+*.shader  text eol=lf
+*.cginc   text eol=lf
+*.hlsl    text eol=lf
+*.compute text eol=lf
+*.json    text eol=lf
+*.md      text eol=lf
+*.txt     text eol=lf
+*.csv     text eol=lf
+*.xml     text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.uss     text eol=lf
+*.uxml    text eol=lf
+
+# Windows-only scripts keep CRLF so cmd.exe parses them correctly.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary ------------------------------------------------------------
+# Marked explicitly so Git never line-ending-mangles or tries to diff
+# them. Recordings, models and textures are all binary.
+*.mp4  binary
+*.mov  binary
+*.mkv  binary
+*.wav  binary
+*.mp3  binary
+*.ogg  binary
+*.aif  binary
+*.aiff binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.tga  binary
+*.tif  binary
+*.tiff binary
+*.psd  binary
+*.exr  binary
+*.hdr  binary
+*.bmp  binary
+*.ico  binary
+*.fbx  binary
+*.obj  binary
+*.blend binary
+*.dae  binary
+*.3ds  binary
+*.ttf  binary
+*.otf  binary
+*.dll  binary
+*.so   binary
+*.dylib binary
+*.pdb  binary
+*.a    binary
+*.lib  binary
+*.unitypackage binary
+*.pdf  binary
+*.zip  binary

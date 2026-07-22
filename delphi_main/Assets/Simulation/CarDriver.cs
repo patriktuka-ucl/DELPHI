@@ -151,6 +151,8 @@ namespace Delphi.Simulation
         private bool _finished;
         private bool _isParked;
         private bool _headingToPark;
+        private bool _parkingInPlace; // braking to a halt where it stands, no marker to aim at
+        private TrackEvent _targetPark; // the specific marker this park request is aimed at
 
         public float CurrentSpeedKmh => Speed * 3.6f;
         /// <summary>True whenever the car is sitting stopped and NOT counting
@@ -197,15 +199,22 @@ namespace Delphi.Simulation
         /// marker (nothing to head to).</summary>
         public void RequestPark()
         {
-            if (_isParked || _headingToPark) return;
-            if (!track.TryGetPark(out _))
+            if (_isParked || _headingToPark || _parkingInPlace) return;
+            if (!track.TryGetParkAhead(S, out _targetPark))
             {
-                Debug.LogWarning("[CarDriver] RequestPark() called but the Track has no Park " +
-                                  "marker (TrackEventKind.Park) — the car will keep driving normally.");
+                // No marker to aim at. Stopping WHERE IT STANDS is much safer
+                // than carrying on: the experiment procedure parks between
+                // conditions so the next baseline is recorded stationary, and
+                // a car still driving through that baseline quietly ruins the
+                // reference the whole Implicit objective is measured against.
+                Debug.LogWarning("[CarDriver] RequestPark(): no Park marker at or ahead of " +
+                                 $"s={S:F0}m — braking to a halt in place instead. Add a Park marker " +
+                                  "ahead of the car to control WHERE the participant is parked.");
+                _parkingInPlace = true;
                 return;
             }
             _headingToPark = true;
-            if (logStateChanges) Debug.Log("[CarDriver] Heading to park.");
+            if (logStateChanges) Debug.Log($"[CarDriver] Heading to park at s={_targetPark.S:F0}m.");
         }
 
         /// <summary>Immediate halt wherever the car currently is — no travel
@@ -218,6 +227,21 @@ namespace Delphi.Simulation
             _isParked = true;
             HoldStopped();
             if (logStateChanges) Debug.Log($"[CarDriver] Emergency halt at s={S:F0}m.");
+        }
+
+        /// <summary>Freeze in place for a brief in-drive pause (the per-
+        /// iteration rating questionnaire) — same instant halt as
+        /// EmergencyHalt, just not logged/framed as an emergency. Deliberately
+        /// NOT RequestPark(): a Park marker can now be far down the track, and
+        /// travelling to it mid-iteration is exactly the "car keeps moving
+        /// while I answer" behaviour this exists to avoid.</summary>
+        public void FreezeInPlace()
+        {
+            _waitingAtRedLight = false;
+            _headingToPark = false;
+            _isParked = true;
+            HoldStopped();
+            if (logStateChanges) Debug.Log($"[CarDriver] Frozen in place at s={S:F0}m.");
         }
 
         // A "Turn" TrackEvent is only a LABEL — it has zero effect on physics.
@@ -273,6 +297,19 @@ namespace Delphi.Simulation
             float targetSpeed = ComputeTargetSpeed();
             StepSpeed(targetSpeed, parameters.AccelJerk, parameters.BrakeJerk, dt);
 
+            // Parking with nowhere to aim: brake at this style's own rate and
+            // latch parked once stopped, so the state the session reads
+            // (IsParked) matches what the car is actually doing.
+            if (_parkingInPlace && Speed <= 0.01f)
+            {
+                _parkingInPlace = false;
+                _isParked = true;
+                HoldStopped();
+                if (logStateChanges) Debug.Log($"[CarDriver] Parked in place (s={S:F0}m).");
+                PlaceOnRoute(dt);
+                return;
+            }
+
             // ── Advance, but NEVER across an unserved stop line ──────
             // The stop line is exactly where the marker sits. If this
             // frame's motion would carry the car past it, the car lands ON
@@ -298,13 +335,14 @@ namespace Delphi.Simulation
             // ── Arriving at the requested Park marker ────────────────
             // Same exact-line landing as a red light, but this one holds
             // indefinitely (IsParked) instead of counting down a timer.
-            if (_headingToPark && track.TryGetPark(out TrackEvent park) && newS >= park.S)
+            if (_headingToPark && _targetPark != null && newS >= _targetPark.S)
             {
-                S = park.S;
+                S = _targetPark.S;
                 _isParked = true;
                 _headingToPark = false;
                 HoldStopped();
-                if (logStateChanges) Debug.Log($"[CarDriver] Parked (s={park.S:F0}m).");
+                if (logStateChanges) Debug.Log($"[CarDriver] Parked (s={_targetPark.S:F0}m).");
+                _targetPark = null;
                 PlaceOnRoute(dt);
                 return;
             }
@@ -312,11 +350,24 @@ namespace Delphi.Simulation
             S = newS;
 
             // ── End of the track ─────────────────────────────────────
+            // Latch PARKED, not just "finished": parked is a state the rest of
+            // the system understands (IsParked, ResumeDriving), whereas the
+            // old finished-only flag silently made Update() a no-op — the car
+            // froze, and every later parameter set the optimizer applied had
+            // no effect on a vehicle that could no longer move.
             if (S >= track.TotalLength)
             {
                 S = track.TotalLength;
                 _finished = true;
-                if (logStateChanges) Debug.Log("[CarDriver] Reached the end of the track.");
+                _headingToPark = false;
+                _parkingInPlace = false;
+                _targetPark = null;
+                _isParked = true;
+                HoldStopped();
+                Debug.LogWarning($"[CarDriver] Reached the END of the track ({track.TotalLength:F0} m) and " +
+                                  "parked. If a condition is still running, the car will now stay " +
+                                  "stationary for the rest of it — extend the track so one pass covers " +
+                                  "the full driving phase.");
             }
 
             PlaceOnRoute(dt);
@@ -343,6 +394,10 @@ namespace Delphi.Simulation
                 target = Mathf.Max(0f, target - slowdownKmh / 3.6f);
             }
 
+            // Parking in place: commanded to zero, braked at this style's own
+            // rate by StepSpeed (same as any other slow-down).
+            if (_parkingInPlace) return 0f;
+
             // Red light: anticipatory braking curve toward the stop line —
             // v = √(2·brakingJerk·distanceRemaining). brakingJerk here is the
             // EXACT constant deceleration StepSpeed will actually apply (no
@@ -362,9 +417,9 @@ namespace Delphi.Simulation
 
             // Same anticipatory braking curve, aimed at the Park marker
             // instead — only active once RequestPark() has been called.
-            if (_headingToPark && track.TryGetPark(out TrackEvent park))
+            if (_headingToPark && _targetPark != null)
             {
-                float distanceRemaining = Mathf.Max(0f, park.S - S);
+                float distanceRemaining = Mathf.Max(0f, _targetPark.S - S);
                 float approachLimit = Mathf.Sqrt(2f * parameters.BrakeJerk * distanceRemaining);
                 target = Mathf.Min(target, approachLimit);
             }

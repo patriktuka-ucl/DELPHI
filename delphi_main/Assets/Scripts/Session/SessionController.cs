@@ -32,20 +32,27 @@ namespace Delphi.Session
     /// (EmergencyStop no longer aborts the trial — see EmergencyStop/Resume).
     ///
     /// The plan is one linear SEGMENT list built once at StartSession from the
-    /// counterbalanced condition order + the free-play toggle:
+    /// counterbalancing order the researcher picked (1–6, see
+    /// CounterbalanceOrders). All THREE conditions — Implicit, Explicit and
+    /// FreeRoam — get identical scaffolding, so the only thing that differs
+    /// between them is what happens during the drive itself:
     ///
     ///   Intro → Meditation
-    ///         → Condition[0] (intro → baseline → iterations) → Parking → Questionnaire → BreakOffer
-    ///         → Condition[1] (intro → baseline → iterations) → Parking → Questionnaire
-    ///         → [BreakOffer → FreePlay → Questionnaire] → Complete
+    ///         → Condition[0] → Parking → Questionnaire → BreakOffer
+    ///         → Condition[1] → Parking → Questionnaire → BreakOffer
+    ///         → Condition[2] → Parking → Questionnaire → Complete
+    ///
+    /// where a Condition is (intro → baseline → iterations) for Implicit and
+    /// Explicit, and (intro → open-ended roaming, ended by the researcher's
+    /// DONE button) for FreeRoam. The break is offered BETWEEN conditions only.
     ///
     /// The closing interview happens IN PERSON, after the headset/screen
     /// experience ends — there is deliberately no in-app Interview phase.
     ///
-    /// firstCondition/includeFreePlay/userId/conditionId/groupId are runtime
-    /// state set by ExperimentUI (the researcher's actual control surface)
-    /// right before StartSession() — not Inspector-configured, since they
-    /// change every participant/session, not every build.
+    /// orderIndex/userId/conditionId are runtime state set by ExperimentUI
+    /// (the researcher's actual control surface) right before StartSession() —
+    /// not Inspector-configured, since they change every participant/session,
+    /// not every build. groupId is derived from orderIndex, not typed.
     /// </summary>
     public class SessionController : MonoBehaviour, IQuestionnaireOptimizationBridge
     {
@@ -57,7 +64,41 @@ namespace Delphi.Session
             Complete, EmergencyStop, Error
         }
 
-        public enum ConditionKind { Implicit, Explicit }
+        /// <summary>The three conditions. FreeRoam is a full peer of the other
+        /// two — same intro/parking/questionnaire/break scaffolding — it just
+        /// has no optimizer loop: the participant roams until they say they're
+        /// done and the researcher ends it. Append-only: the value is
+        /// serialized in the segment plan and written to every CSV.</summary>
+        public enum ConditionKind { Implicit, Explicit, FreeRoam }
+
+        /// <summary>The six ways three conditions can be ordered. The
+        /// researcher picks one per participant (1–6); index 0..5 maps to that
+        /// number. The table is FIXED and must never be reordered — the chosen
+        /// number is recorded as GroupID in every CSV, so "order 4" has to mean
+        /// the same sequence at analysis time as it did on the day.</summary>
+        public static readonly ConditionKind[][] CounterbalanceOrders =
+        {
+            new[] { ConditionKind.Implicit, ConditionKind.Explicit, ConditionKind.FreeRoam },
+            new[] { ConditionKind.Implicit, ConditionKind.FreeRoam, ConditionKind.Explicit },
+            new[] { ConditionKind.Explicit, ConditionKind.Implicit, ConditionKind.FreeRoam },
+            new[] { ConditionKind.Explicit, ConditionKind.FreeRoam, ConditionKind.Implicit },
+            new[] { ConditionKind.FreeRoam, ConditionKind.Implicit, ConditionKind.Explicit },
+            new[] { ConditionKind.FreeRoam, ConditionKind.Explicit, ConditionKind.Implicit },
+        };
+
+        public const int OrderCount = 6;
+
+        /// <summary>The order this participant is running, as the 1–6 the
+        /// researcher actually picks. Clamped, so a bad value can't index off
+        /// the table mid-session.</summary>
+        public static ConditionKind[] OrderFor(int oneBasedOrder) =>
+            CounterbalanceOrders[Mathf.Clamp(oneBasedOrder, 1, OrderCount) - 1];
+
+        /// <summary>"Implicit → FreeRoam → Explicit" — for the researcher UI
+        /// and the session log, so the picked order is legible at a glance
+        /// instead of being a bare number.</summary>
+        public static string DescribeOrder(int oneBasedOrder) =>
+            string.Join(" → ", OrderFor(oneBasedOrder));
 
         /// <summary>What feeds the optimizer's objectives for the condition
         /// currently running. Physiology: the baseline-deviation pipeline
@@ -92,7 +133,7 @@ namespace Delphi.Session
         private enum SegmentKind
         {
             Intro, Meditation, Condition,
-            Parking, Questionnaire, BreakOffer, FreePlay, Complete
+            Parking, Questionnaire, BreakOffer, Complete
         }
 
         private struct Segment
@@ -121,11 +162,16 @@ namespace Delphi.Session
         // ── Set by ExperimentUI at runtime, not Inspector-configured ─────
         // (a researcher picks these fresh per participant/session, not once
         // per build — see ExperimentUI's session-setup controls.)
-        [HideInInspector] public ConditionKind firstCondition = ConditionKind.Implicit;
-        [HideInInspector] public bool includeFreePlay = true;
+        [HideInInspector] public int orderIndex = 1; // 1..6, see CounterbalanceOrders
         [HideInInspector] public string userId = "P1";
         [HideInInspector] public string conditionId = "pilot"; // computed internally per condition, not set by anyone
-        [HideInInspector] public string groupId = "0";
+
+        /// <summary>The counterbalancing order (1–6) this participant ran,
+        /// which is exactly what the BO framework's "GroupID" column should
+        /// carry: derived from <see cref="orderIndex"/> rather than typed, so
+        /// the recorded group can never disagree with the order actually run.
+        /// </summary>
+        public string groupId => orderIndex.ToString();
 
         [Header("Timed-phase durations (seconds)")]
         [Tooltip("Self-park settle time before the questionnaire.")]
@@ -168,7 +214,8 @@ namespace Delphi.Session
                  "an instant jolt is itself a startle stimulus. Clamped to " +
                  "Washout above so measurement never starts mid-ramp.")]
         [Min(0f)] public float transitionSeconds = 3f;
-        [Tooltip("Empty = auto: the project-local venv at BOPythonEnv/bin/python3.")]
+        [Tooltip("Empty = auto: the project-local venv at BOPythonEnv " +
+                 "(Scripts/python.exe on Windows, bin/python3 elsewhere).")]
         public string pythonPath = "";
         public int seed = 3;
 
@@ -183,7 +230,7 @@ namespace Delphi.Session
         public Phase CurrentPhase { get; private set; } = Phase.Idle;
         public string StatusLine { get; private set; } = "Idle";
         public int ConditionNumber { get; private set; }
-        public int ConditionCount => 2;
+        public int ConditionCount => OrderCount == 0 ? 0 : CounterbalanceOrders[0].Length;
         public bool IsAwaitingResearcher { get; private set; }
         public bool AwaitingBreakResume { get; private set; }
         public ConditionKind CurrentConditionKind { get; private set; }
@@ -226,6 +273,7 @@ namespace Delphi.Session
 
         // ── Trial runtime state ──────────────────────────────────────────
         private BoBridge _bo;
+        private bool _quitting; // QuitSession blocks for seconds — guards re-entry
         private string _lastBoLaunchError;
         private bool _trialActuallyStarted;
         private double _trialStart;
@@ -279,19 +327,60 @@ namespace Delphi.Session
 
         // ── Public control (researcher UI) ──────────────────────────────
         /// <summary>Build the plan and begin. No-op unless idle/complete.
-        /// firstCondition/includeFreePlay/userId/groupId should already be
-        /// set by the caller (ExperimentUI) before calling this.</summary>
+        /// orderIndex/userId should already be set by the caller (ExperimentUI)
+        /// before calling this.</summary>
         public bool StartSession()
         {
             if (CurrentPhase != Phase.Idle && CurrentPhase != Phase.Complete)
                 return false;
 
+            if (!ValidateTrackForSession()) return false;
+
             BuildPlan();
             _segmentIndex = -1;
             ConditionNumber = 0;
-            Debug.Log($"[Session] Starting — participant '{userId}', first condition {firstCondition}, " +
-                      $"free-play {(includeFreePlay ? "on" : "off")}, {_plan.Count} segments.");
+            Debug.Log($"[Session] Starting — participant '{userId}', order {orderIndex}/{OrderCount} " +
+                      $"({DescribeOrder(orderIndex)}), {_plan.Count} segments.");
             AdvanceToNextSegment();
+            return true;
+        }
+
+        /// <summary>Refuse to start a session the track can't actually run.
+        ///
+        /// Without a Park marker RequestPark() only logs a warning and returns,
+        /// so the Parking segment after each condition silently does nothing:
+        /// the car keeps driving through the questionnaire and the break, and
+        /// the NEXT condition's baseline is then recorded while it's still
+        /// moving. That baseline is the reference the whole Implicit objective
+        /// is computed against, so the session would look like it ran fine and
+        /// produce quietly worthless physiological data. Better to not start.
+        /// </summary>
+        private bool ValidateTrackForSession()
+        {
+            if (carDriver == null)
+            {
+                Debug.LogError("[Session] No CarDriver — cannot start.");
+                StatusLine = "No CarDriver in the scene";
+                return false;
+            }
+            if (carDriver.track == null || !carDriver.track.IsReady)
+            {
+                Debug.LogError("[Session] The CarDriver has no ready Track — cannot start.");
+                StatusLine = "Track not ready";
+                return false;
+            }
+            if (!carDriver.track.TryGetPark(out _))
+            {
+                // Not fatal any more: CarDriver now brakes to a halt in place
+                // when asked to park with no marker, so the baseline is still
+                // recorded stationary. Only WHERE the participant ends up is
+                // uncontrolled, which is a study-design concern rather than a
+                // corrupted-data one — so warn loudly and let the run proceed.
+                Debug.LogWarning("[Session] The track has no Park marker (TrackEventKind.Park). " +
+                                 "The car will brake to a halt wherever it happens to be at each " +
+                                 "Parking segment, so the participant won't stop at a consistent " +
+                                 "place between conditions. Add a Park marker before collecting real data.");
+            }
             return true;
         }
 
@@ -328,6 +417,10 @@ namespace Delphi.Session
             }
         }
 
+        /// <summary>Researcher: the participant has said they're done roaming.
+        /// Ends the FreeRoam condition and falls into the SAME tail every other
+        /// condition has — Parking (the car drives itself to the park marker),
+        /// then the questionnaire, then the break offer.</summary>
         public void EndFreePlay()
         {
             if (CurrentPhase != Phase.FreePlay) return;
@@ -349,10 +442,57 @@ namespace Delphi.Session
             LogFreePlayRow();
         }
 
+        /// <summary>Begin the FreeRoam condition proper, once its intro
+        /// narration has finished. Deliberately does NOT touch the optimizer:
+        /// the prewarmed process is left connected and untouched for whichever
+        /// condition comes next, so a FreeRoam slot in the middle of the order
+        /// costs nothing to restart afterwards.</summary>
+        /// <summary>FreeRoam has no baseline and no iterations. This exists so
+        /// the shared metadata writer has something to read, and so a FreeRoam
+        /// folder on disk ends up the same shape as an Implicit/Explicit one —
+        /// same sensors.csv, same videos, same trial_meta.json — rather than
+        /// being a special case at analysis time.</summary>
+        private static readonly ConditionTrialConfig FreeRoamConfig = new()
+        {
+            baselineSeconds = 0f,
+            baselineAveragingSeconds = 0f,
+            iterations = 0,
+            samplingIterations = 1
+        };
+
+        private void StartFreeRoamCondition()
+        {
+            conditionId = "freeroam";
+            CurrentPhase = Phase.FreePlay;
+            IsAwaitingResearcher = true;
+
+            // Recording is IDENTICAL across all three conditions: the sensor
+            // csv and every video feed are driven by SessionRecorder, which
+            // StartFreePlayLogging starts exactly as StartConditionTrial does.
+            // These fields only make the trial metadata come out too.
+            _activeConfig = FreeRoamConfig;
+            _objectiveChannels = new List<Channel>();
+            _baseline.Clear();
+            Iteration = 0;
+            LastCoverage = float.NaN;
+            _trialStart = DelphiClock.Now;
+            _driveStart = DelphiClock.Now;
+            _trialActuallyStarted = true;
+            StatusLine = $"Condition {ConditionNumber}/{ConditionCount} (FreeRoam) — " +
+                          "roaming; press DONE when the participant says they've finished";
+
+            // The car is parked coming into every condition (startParked, or
+            // the previous condition's Parking segment). Nothing else releases
+            // it here — the BO conditions un-park at their first iteration,
+            // which FreeRoam never reaches — so it has to happen explicitly.
+            carDriver?.ResumeDriving();
+            StartFreePlayLogging();
+        }
+
         private void StartFreePlayLogging()
         {
             if (recorder != null && !recorder.IsRecording)
-                recorder.StartRecording($"freeplay_{userId}");
+                recorder.StartRecording($"trial_{userId}_{conditionId}");
 
             string dir = recorder != null && recorder.IsRecording
                 ? recorder.CurrentSessionPath
@@ -450,30 +590,72 @@ namespace Delphi.Session
             Debug.Log("[Trial] Aborted.");
         }
 
+        /// <summary>Researcher: end everything and close the application —
+        /// safely. Every video feed is finalised (pending GPU readbacks are
+        /// drained, then each ffmpeg encoder gets its stdin closed and is
+        /// waited on, so no mp4 is left truncated/unplayable), the sensor csv
+        /// and trial/free-roam logs are closed, the trial meta is written and
+        /// the optimizer process is shut down — and only THEN does the app
+        /// exit. Usable from ANY phase, including mid-condition: a session
+        /// that has to be abandoned still leaves complete, playable data.
+        ///
+        /// Blocks the main thread for up to ~15s per feed while ffmpeg
+        /// finalises. That freeze is the point — quitting before the encoders
+        /// flush is exactly how you lose a participant's recording.</summary>
+        public void QuitSession(string reason = "Quit by researcher")
+        {
+            // Finish() blocks, so the UI can't repaint and the researcher may
+            // well click again — re-entering teardown would double-dispose.
+            if (_quitting) return;
+            _quitting = true;
+
+            IsAwaitingResearcher = false;
+            _phaseEnd = 0;
+            StatusLine = "Quitting — finalising recordings…";
+            Debug.Log("[Session] Quit requested — finalising recordings before exit.");
+
+            // Stop the car before the long blocking wait, so it isn't left
+            // driving itself while the encoders flush.
+            carDriver?.EmergencyHalt();
+
+            // Same teardown every other end-path uses, so quitting can't
+            // produce a differently-shaped session folder than a normal finish.
+            Cleanup(reason);
+
+            CurrentPhase = Phase.Complete;
+            Debug.Log("[Session] All recordings closed and processes stopped — exiting.");
+            QuitApplication();
+        }
+
+        private static void QuitApplication()
+        {
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.isPlaying = false;
+#else
+            Application.Quit();
+#endif
+        }
+
         // ── Plan construction ───────────────────────────────────────────
         private void BuildPlan()
         {
             _plan.Clear();
-            ConditionKind second = firstCondition == ConditionKind.Implicit
-                ? ConditionKind.Explicit : ConditionKind.Implicit;
 
             Add(SegmentKind.Intro);
             Add(SegmentKind.Meditation);
 
-            AddCondition(firstCondition);
-            Add(SegmentKind.Parking, parkingSeconds);
-            Add(SegmentKind.Questionnaire);
-            Add(SegmentKind.BreakOffer);
-
-            AddCondition(second);
-            Add(SegmentKind.Parking, parkingSeconds);
-            Add(SegmentKind.Questionnaire);
-
-            if (includeFreePlay)
+            // All three conditions get IDENTICAL scaffolding — intro, the
+            // condition itself, park, questionnaire — so nothing about the
+            // procedure differs between them except what happens during the
+            // drive. The break is offered BETWEEN conditions only; after the
+            // last one the session just ends.
+            var order = OrderFor(orderIndex);
+            for (int i = 0; i < order.Length; i++)
             {
-                Add(SegmentKind.BreakOffer);
-                Add(SegmentKind.FreePlay);
+                AddCondition(order[i]);
+                Add(SegmentKind.Parking, parkingSeconds);
                 Add(SegmentKind.Questionnaire);
+                if (i < order.Length - 1) Add(SegmentKind.BreakOffer);
             }
 
             Add(SegmentKind.Complete);
@@ -546,14 +728,6 @@ namespace Delphi.Session
                     StatusLine = "Break? — awaiting participant's choice";
                     break;
 
-                case SegmentKind.FreePlay:
-                    CurrentPhase = Phase.FreePlay;
-                    narration?.Play(NarrationController.Line.FreePlayIntro);
-                    IsAwaitingResearcher = true;
-                    StatusLine = "Free-play — manual slider control, recording";
-                    StartFreePlayLogging();
-                    break;
-
                 case SegmentKind.Complete:
                     EnterComplete();
                     break;
@@ -569,14 +743,48 @@ namespace Delphi.Session
         {
             ConditionNumber++;
             CurrentConditionKind = kind;
+            ResetParametersToNeutral();
 
-            var introLine = kind == ConditionKind.Implicit
-                ? NarrationController.Line.IntroImplicit
-                : NarrationController.Line.IntroExplicit;
+            var introLine = kind switch
+            {
+                ConditionKind.Implicit => NarrationController.Line.IntroImplicit,
+                ConditionKind.Explicit => NarrationController.Line.IntroExplicit,
+                _                      => NarrationController.Line.IntroFreeRoam,
+            };
 
             narration?.Play(introLine);
             CurrentPhase = Phase.ConditionIntro;
             StartTimer(NarrationSeconds(introLine), $"Condition {ConditionNumber}/{ConditionCount} ({kind}) — intro");
+        }
+
+        /// <summary>Middle of every parameter's 0–1 range — the neutral driving
+        /// style each condition starts from.</summary>
+        public const float NeutralParameterValue = 0.5f;
+
+        /// <summary>Put every driving parameter back to neutral at the start of
+        /// each condition. Without this a condition inherits whatever the
+        /// previous one left behind — the last set the optimizer chose, or
+        /// wherever the participant dragged the FreeRoam sliders — so the
+        /// second and third conditions would begin from a different driving
+        /// style than the first did. That is a straightforward order effect,
+        /// and it would be baked in underneath the counterbalancing that
+        /// exists to cancel exactly this.</summary>
+        private void ResetParametersToNeutral()
+        {
+            if (carDriver == null) return;
+
+            foreach (var key in ParameterKeys)
+                SetParam(carDriver.parameters, key, NeutralParameterValue);
+
+            // Drop any ramp still in flight from the previous condition, or
+            // TickTransition would immediately drag these values back toward
+            // that condition's last target.
+            _transFrom = null;
+            _transTo = null;
+            _transDuration = 0f;
+            _lastParams = new Dictionary<string, float>();
+
+            Debug.Log($"[Trial] Driving parameters reset to {NeutralParameterValue:0.##} for the new condition.");
         }
 
         private void StartTimer(float seconds, string status)
@@ -629,8 +837,11 @@ namespace Delphi.Session
                 case Phase.Parking:
                     if (_phaseEnd > 0 && DelphiClock.Now >= _phaseEnd)
                     {
-                        if (CurrentPhase == Phase.ConditionIntro) StartConditionTrial(CurrentConditionKind);
-                        else AdvanceToNextSegment();
+                        if (CurrentPhase != Phase.ConditionIntro) AdvanceToNextSegment();
+                        // FreeRoam has no optimizer/baseline/iteration loop —
+                        // it's open-ended and ends on the researcher's button.
+                        else if (CurrentConditionKind == ConditionKind.FreeRoam) StartFreeRoamCondition();
+                        else StartConditionTrial(CurrentConditionKind);
                     }
                     break;
 
@@ -821,7 +1032,7 @@ namespace Delphi.Session
                     StatusLine = $"Iteration {Iteration}/{TotalIterations} — parked, awaiting rating";
                     _measureStart = DelphiClock.Now;
                     _pendingQuestionnaireValues.Clear();
-                    carDriver?.RequestPark();
+                    carDriver?.FreezeInPlace(); // instant halt, not a drive to a (possibly distant) Park marker
                     questionnaire.StartQuestionnaire();
                 }
                 else
@@ -855,7 +1066,14 @@ namespace Delphi.Session
                 switch ((string)msg["type"])
                 {
                     case "parameters":
-                        ApplyParameters((JObject)msg["values"]);
+                        // The ramp exists so a parameter change mid-drive isn't
+                        // itself a startle stimulus. A PARKED car has nothing to
+                        // startle: ramping there just means the first pull-away
+                        // happens on a blend of 0.5 and the optimizer's values
+                        // rather than on the set being evaluated. So the first
+                        // set lands instantly, before the car is released.
+                        ApplyParameters((JObject)msg["values"],
+                                        instant: carDriver != null && carDriver.IsParked);
                         Iteration++;
                         // Baseline (and any wait before this point) was
                         // stationary — the drive begins exactly when the
@@ -987,29 +1205,44 @@ namespace Delphi.Session
             return true;
         }
 
-        private void ApplyParameters(JObject values)
+        private void ApplyParameters(JObject values, bool instant = false)
         {
             var p = carDriver.parameters;
-            _transFrom = new Dictionary<string, float>();
-            _transTo = new Dictionary<string, float>();
-            foreach (var key in ParameterKeys)
-            {
-                float current = GetParam(p, key);
-                _transFrom[key] = current;
-                _transTo[key] = Get(values, key, current);
-            }
-            _transStart = DelphiClock.Now;
 
-            _transDuration = Mathf.Clamp(transitionSeconds, 0f, EffectiveWashoutSeconds);
-            if (transitionSeconds > EffectiveWashoutSeconds)
-                Debug.LogWarning($"[Trial] transitionSeconds ({transitionSeconds:0.#}s) exceeds the washout " +
-                                 $"({EffectiveWashoutSeconds:0.#}s) — clamped to {_transDuration:0.#}s so measurement never " +
-                                 "starts mid-ramp.");
+            if (instant)
+            {
+                // Land the values now and cancel any ramp — the car is parked,
+                // so it pulls away already ON the set being evaluated.
+                foreach (var key in ParameterKeys)
+                    SetParam(p, key, Get(values, key, GetParam(p, key)));
+                _transFrom = null;
+                _transTo = null;
+                _transDuration = 0f;
+            }
+            else
+            {
+                _transFrom = new Dictionary<string, float>();
+                _transTo = new Dictionary<string, float>();
+                foreach (var key in ParameterKeys)
+                {
+                    float current = GetParam(p, key);
+                    _transFrom[key] = current;
+                    _transTo[key] = Get(values, key, current);
+                }
+                _transStart = DelphiClock.Now;
+
+                _transDuration = Mathf.Clamp(transitionSeconds, 0f, EffectiveWashoutSeconds);
+                if (transitionSeconds > EffectiveWashoutSeconds)
+                    Debug.LogWarning($"[Trial] transitionSeconds ({transitionSeconds:0.#}s) exceeds the washout " +
+                                     $"({EffectiveWashoutSeconds:0.#}s) — clamped to {_transDuration:0.#}s so measurement never " +
+                                     "starts mid-ramp.");
+            }
 
             _lastParams = new Dictionary<string, float>();
             foreach (var prop in values.Properties()) _lastParams[prop.Name] = (float)prop.Value;
 
-            Debug.Log($"[Trial] Applied parameter set #{Iteration + 1} (ramping over {_transDuration:0.#}s): " +
+            Debug.Log($"[Trial] Applied parameter set #{Iteration + 1} " +
+                      (instant ? "(instantly — car parked)" : $"(ramping over {_transDuration:0.#}s)") + ": " +
                       $"{values.ToString(Newtonsoft.Json.Formatting.None)}");
         }
 
@@ -1322,7 +1555,7 @@ namespace Delphi.Session
 
                     optimizerSeed = seed,
                     pythonPathUsed = string.IsNullOrWhiteSpace(pythonPath)
-                        ? Path.GetFullPath(Path.Combine(Application.dataPath, "..", "BOPythonEnv", "bin", "python3"))
+                        ? Delphi.Trial.BoBridge.DefaultPythonPath
                         : pythonPath,
 
                     sessionRecordingPath = sessionPath ?? "",
@@ -1447,15 +1680,17 @@ namespace Delphi.Session
         // ── Read helpers for the researcher UI ──────────────────────────
         public ConditionKind ConditionKindAt(int slot)
         {
-            ConditionKind second = firstCondition == ConditionKind.Implicit
-                ? ConditionKind.Explicit : ConditionKind.Implicit;
-            return slot == 0 ? firstCondition : second;
+            var order = OrderFor(orderIndex);
+            return order[Mathf.Clamp(slot, 0, order.Length - 1)];
         }
 
         /// <summary>Rough wall-clock length of ONE condition of this kind:
-        /// baseline + all iteration windows.</summary>
+        /// baseline + all iteration windows. Returns 0 for FreeRoam, which is
+        /// open-ended by design — callers should show "open-ended" rather than
+        /// print a fake estimate.</summary>
         public float EstimatedConditionSeconds(ConditionKind kind)
         {
+            if (kind == ConditionKind.FreeRoam) return 0f;
             var cfg = kind == ConditionKind.Implicit ? implicitTrial : explicitTrial;
             return cfg.baselineSeconds + cfg.iterations * windowSeconds;
         }
@@ -1473,7 +1708,7 @@ namespace Delphi.Session
             return Mathf.Clamp01(Iteration / (float)TotalIterations);
         }
 
-        public int ActiveConditionSlot => Mathf.Clamp(ConditionNumber - 1, -1, 1);
+        public int ActiveConditionSlot => Mathf.Clamp(ConditionNumber - 1, -1, ConditionCount - 1);
 
         // ── Debug (context menu) ────────────────────────────────────────
         [ContextMenu("Start Session")] private void CtxStart() => StartSession();

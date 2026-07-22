@@ -31,7 +31,9 @@ namespace Delphi
     {
         Webcam,           // participant-facing physical camera (WebcamSensor)
         SceneOverview,    // bird's-eye scene camera (CameraFeedSensor)
-        PlayerView        // what the participant sees (CameraFeedSensor)
+        PlayerView,       // what the participant sees (CameraFeedSensor)
+        Panorama360       // 360° equirect of the environment (Panorama360Sensor)
+        // Append only — the value is written into recorded session metadata.
     }
 
     /// <summary>
@@ -121,6 +123,11 @@ namespace Delphi
         [SerializeField] private bool playerViewOn = true;
         [SerializeField] private FrameSensor playerView;
         [SerializeField] private float playerViewFps = 30f;
+        [SerializeField] private bool panorama360On = true;
+        [SerializeField] private FrameSensor panorama360;
+        [Tooltip("Six cube faces are rendered per frame here, so this is the " +
+                 "most expensive feed — keep it well below the others.")]
+        [SerializeField] private float panorama360Fps = 10f;
 
         // The acquisition engine — all scalar sampling and csv recording
         // happen on ITS dedicated thread with its own DelphiClock schedule,
@@ -133,7 +140,9 @@ namespace Delphi
         // Frame feed next-tick times (frame capture MUST stay on the main
         // thread — camera/texture APIs). Scheduled on DelphiClock, same
         // time base as the core.
-        private readonly double[] _frameNext = new double[3]; // indexed by FrameChannel
+        // Sized off AllFrameChannels rather than a hardcoded count, so adding a
+        // channel can't silently under-size this and throw/skip in Update().
+        private readonly double[] _frameNext = new double[AllFrameChannels.Length];
 
         private static readonly Channel[] GoldStandardChannels =
             { Channel.HeartRate, Channel.RMSSD, Channel.RespRate, Channel.GSR };
@@ -154,7 +163,8 @@ namespace Delphi
 
         public static readonly FrameChannel[] AllFrameChannels =
         {
-            FrameChannel.Webcam, FrameChannel.SceneOverview, FrameChannel.PlayerView
+            FrameChannel.Webcam, FrameChannel.SceneOverview, FrameChannel.PlayerView,
+            FrameChannel.Panorama360
         };
 
         // ── Playback override ───────────────────────────────────────────
@@ -235,6 +245,7 @@ namespace Delphi
             FrameChannel.Webcam        => ("Webcam", ""),
             FrameChannel.SceneOverview => ("Scene overview", ""),
             FrameChannel.PlayerView    => ("Player view", ""),
+            FrameChannel.Panorama360   => ("360° environment", ""),
             _                          => (ch.ToString(), "")
         };
 
@@ -304,6 +315,7 @@ namespace Delphi
             FrameChannel.Webcam        => webcamFps,
             FrameChannel.SceneOverview => sceneOverviewFps,
             FrameChannel.PlayerView    => playerViewFps,
+            FrameChannel.Panorama360   => panorama360Fps,
             _                          => 30f
         });
 
@@ -347,6 +359,7 @@ namespace Delphi
             FrameChannel.Webcam        => webcam,
             FrameChannel.SceneOverview => sceneOverview,
             FrameChannel.PlayerView    => playerView,
+            FrameChannel.Panorama360   => panorama360,
             _                          => null
         };
 
@@ -355,6 +368,7 @@ namespace Delphi
             FrameChannel.Webcam        => webcamOn,
             FrameChannel.SceneOverview => sceneOverviewOn,
             FrameChannel.PlayerView    => playerViewOn,
+            FrameChannel.Panorama360   => panorama360On,
             _                          => true
         };
     }
