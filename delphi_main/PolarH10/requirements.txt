@@ -1,2 +1,7 @@
-bleak==3.0.2
+# bleak 3.0.2 (the current latest) intermittently fails start_notify with a
+# WinRT "Operation aborted" on this Windows rig; the mature 0.22.x line behaves
+# the same at the stack level, but is what we validated the bridge's retry loop
+# against. Either works with the retries in polar_h10_stream.py — pinned to the
+# validated one. (Root cause is below bleak: Intel BT driver / radio contention.)
+bleak==0.22.3
 python-osc==1.10.2

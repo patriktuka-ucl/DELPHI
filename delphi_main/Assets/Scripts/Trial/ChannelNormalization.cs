@@ -111,8 +111,10 @@ namespace Delphi.Trial
             Channel.RMSSD         => 20f,   // ms
             Channel.RespRate      => 3f,    // breaths/min
             Channel.GSR           => 50f,   // raw 10-bit units (device-dependent!)
-            Channel.BlinkRate     => 5f,    // blinks/min
-            Channel.Gaze          => 0.3f,
+            Channel.GsrTonic      => 40f,   // slow SCL, similar raw scale — placeholder
+            Channel.GsrPhasic     => 20f,   // fast SCR deviations, smaller — placeholder
+            Channel.InterBlinkInterval => 3f,   // inter-blink interval, seconds — placeholder
+            Channel.Gaze          => 2f,    // gaze distance from baseline, degrees — placeholder
             Channel.PupilDiameter => 0.5f,  // mm
             Channel.EEG           => 20f,   // µV
             Channel.Facial        => 0.3f,

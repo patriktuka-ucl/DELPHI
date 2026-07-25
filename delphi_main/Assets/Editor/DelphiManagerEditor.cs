@@ -17,38 +17,70 @@ namespace Delphi.EditorTools
     {
         private struct Row
         {
-            public string label, onProp, sensorProp, rateProp;
-            public Row(string label, string onProp, string sensorProp, string rateProp = null)
-            { this.label = label; this.onProp = onProp; this.sensorProp = sensorProp; this.rateProp = rateProp; }
+            public string label, onProp, sensorProp, rateProp, tooltip;
+            // tooltip is optional and comes AFTER rateProp so the frame rows
+            // below (which pass a rateProp positionally) keep working unchanged.
+            public Row(string label, string onProp, string sensorProp,
+                       string rateProp = null, string tooltip = null)
+            {
+                this.label = label; this.onProp = onProp; this.sensorProp = sensorProp;
+                this.rateProp = rateProp; this.tooltip = tooltip;
+            }
         }
 
         // rateProp is the group's shared Hz field (drawn on the header line,
         // right-aligned) — every sensor in a group samples at that one rate.
+        // Each row's tooltip explains HOW that measure is calculated (hover the
+        // label in the Inspector) — cross-referenced against the sensor code.
         private static readonly (string header, string rateProp, Row[] rows)[] ScalarGroups =
         {
-            ("Gold-standard inputs", "goldStandardRateHz", new[]
+            ("Contact sensors", "contactRateHz", new[]
             {
-                new Row("Heart rate",     "heartRateOn",      "heartRate"),
-                new Row("HRV (RMSSD)",    "hrvRmssdOn",        "hrvRmssd"),
-                new Row("Resp. rate",     "respRateOn",        "respRate"),
-                new Row("GSR",            "gsrOn",             "gsr"),
+                new Row("Heart rate", "heartRateOn", "heartRate", tooltip:
+                    "Heart rate (bpm). Detected on the Polar H10 chest strap itself and " +
+                    "relayed over OSC (/PolarH10/HR) — DELPHI passes it through unchanged."),
+                new Row("HRV (RMSSD)", "hrvRmssdOn", "hrvRmssd", tooltip:
+                    "Root-mean-square of successive RR-interval differences over the last " +
+                    "~12 beats, from the strap's beat-to-beat RR intervals (/PolarH10/RR)."),
+                new Row("Resp. rate", "respRateOn", "respRate", tooltip:
+                    "Respiration rate (breaths/min). No respiration sensor is wired yet — " +
+                    "currently a placeholder / mock signal."),
+                new Row("GSR (raw)", "gsrOn", "gsr", tooltip:
+                    "Raw 0–1023 ADC value from the Grove GSR sensor over serial, " +
+                    "uncalibrated (higher = more skin conductance / arousal)."),
+                new Row("GSR tonic", "gsrTonicOn", "gsrTonic", tooltip:
+                    "Skin-conductance LEVEL (SCL): the slow < 0.05 Hz component of the raw " +
+                    "GSR (cleaned at 3 Hz first). Same band split as NeuroKit2's eda_phasic; " +
+                    "computed live with a causal filter (GSRTonicSensor)."),
+                new Row("GSR phasic", "gsrPhasicOn", "gsrPhasic", tooltip:
+                    "Skin-conductance RESPONSE (SCR): the fast 0.05–3 Hz band (cleaned − " +
+                    "tonic) — arousal-driven bursts. NeuroKit2-aligned cutoffs, live causal " +
+                    "filter; run recorded raw GSR through NeuroKit2 for the definitive values."),
             }),
-            ("Good additions", "goodAdditionsRateHz", new[]
+            ("Gaze Metrics", "gazeRateHz", new[]
             {
-                new Row("Blink rate",     "blinkRateOn",       "blinkRate"),
-                new Row("Gaze / Saccade", "gazeOn",            "gaze"),
-                new Row("Pupil diameter", "pupilDiameterOn",   "pupilDiameter"),
-            }),
-            ("Experimental", "experimentalRateHz", new[]
-            {
-                new Row("EEG",            "eegOn",             "eeg"),
-                new Row("Facial affect",   "facialOn",          "facial"),
+                new Row("Inter-blink interval", "blinkIntervalOn", "blinkInterval", tooltip:
+                    "Seconds between consecutive blinks — a CONTINUOUS measure (updated on " +
+                    "each blink, held in between), not a windowed blink-per-minute count. No " +
+                    "eye tracker is wired yet — placeholder / mock signal."),
+                new Row("Gaze distance", "gazeOn", "gaze", tooltip:
+                    "Distance of the current gaze point from the participant's baseline " +
+                    "fixation point (degrees of visual angle) — a CONTINUOUS per-sample " +
+                    "deviation, no windowing. No eye tracker is wired yet — placeholder / mock."),
+                new Row("Pupil diameter", "pupilDiameterOn", "pupilDiameter", tooltip:
+                    "Pupil diameter (mm). No eye tracker is wired yet — placeholder / mock signal."),
             }),
             ("IMU / Accelerometer", "imuRateHz", new[]
             {
-                new Row("Acc X",           "accXOn",            "accX"),
-                new Row("Acc Y",           "accYOn",            "accY"),
-                new Row("Acc Z",           "accZOn",            "accZ"),
+                new Row("Acc X", "accXOn", "accX", tooltip:
+                    "Raw Polar H10 accelerometer, X axis, in milli-g, streamed over OSC at " +
+                    "200 Hz — passed through unchanged."),
+                new Row("Acc Y", "accYOn", "accY", tooltip:
+                    "Raw Polar H10 accelerometer, Y axis, in milli-g, streamed over OSC at " +
+                    "200 Hz — passed through unchanged."),
+                new Row("Acc Z", "accZOn", "accZ", tooltip:
+                    "Raw Polar H10 accelerometer, Z axis, in milli-g, streamed over OSC at " +
+                    "200 Hz — passed through unchanged."),
             }),
         };
 
@@ -66,9 +98,9 @@ namespace Delphi.EditorTools
         {
             { "heartRate", Channel.HeartRate }, { "hrvRmssd", Channel.RMSSD },
             { "respRate", Channel.RespRate },   { "gsr", Channel.GSR },
-            { "blinkRate", Channel.BlinkRate }, { "gaze", Channel.Gaze },
+            { "gsrTonic", Channel.GsrTonic },   { "gsrPhasic", Channel.GsrPhasic },
+            { "blinkInterval", Channel.InterBlinkInterval }, { "gaze", Channel.Gaze },
             { "pupilDiameter", Channel.PupilDiameter },
-            { "eeg", Channel.EEG },             { "facial", Channel.Facial },
             { "accX", Channel.AccX },           { "accY", Channel.AccY },
             { "accZ", Channel.AccZ },
         };
@@ -97,6 +129,8 @@ namespace Delphi.EditorTools
             var mgr = (DelphiManager)target;
             serializedObject.Update();
 
+            DrawDebugSection(mgr);
+
             EditorGUILayout.Space(2);
             DrawLegend();
             EditorGUILayout.Space(10);
@@ -110,7 +144,8 @@ namespace Delphi.EditorTools
                     // DrawRow, after that row's own click (if any) has already
                     // been pushed to the live target — see DrawRow's comment.
                     DrawRow(row.label, row.onProp, row.sensorProp,
-                            () => mgr.GetStatus(ChannelByProp[row.sensorProp]));
+                            () => mgr.GetStatus(ChannelByProp[row.sensorProp]),
+                            tooltip: row.tooltip);
                 EditorGUILayout.EndVertical();
                 EditorGUILayout.Space(14);
             }
@@ -158,6 +193,44 @@ namespace Delphi.EditorTools
                 EditorGUI.FloatField(fieldRect, rateProp.floatValue), 1f, 240f);
         }
 
+        // Debug Constant Feed toggle. Driven here (not as a plain field) so
+        // flipping it fires DelphiManager.SetDebugConstantFeed, which snapshots
+        // + clears every channel toggle on the way in and restores them on the
+        // way out. After that direct-field mutation we re-Update the serialized
+        // buffer so the group rows below redraw with the cleared/restored state.
+        private void DrawDebugSection(DelphiManager mgr)
+        {
+            EditorGUILayout.BeginVertical("box");
+
+            bool dbg = mgr.DebugConstantFeed;
+            bool newDbg = EditorGUILayout.ToggleLeft(
+                " DEBUG — feed a constant to ALL metrics (run with no hardware)",
+                dbg, EditorStyles.boldLabel);
+            if (newDbg != dbg)
+            {
+                Undo.RecordObject(mgr, "Toggle Debug Constant Feed");
+                mgr.SetDebugConstantFeed(newDbg);
+                EditorUtility.SetDirty(mgr);
+                serializedObject.Update(); // resync after direct field edits
+            }
+
+            if (mgr.DebugConstantFeed)
+            {
+                EditorGUILayout.PropertyField(
+                    serializedObject.FindProperty("debugValue"),
+                    new GUIContent("Constant value", "Fed to every metric, and into " +
+                                   "the BO baseline/windows, while debug is on."));
+                EditorGUILayout.HelpBox(
+                    "All channel toggles are forced OFF and every metric reports this " +
+                    "constant, so a full session / BO loop runs with no sensors attached. " +
+                    "Turn this off to restore your previous ON/OFF toggles.",
+                    MessageType.Info);
+            }
+
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.Space(8);
+        }
+
         private void DrawLegend()
         {
             float rowHeight = EditorGUIUtility.singleLineHeight;
@@ -194,7 +267,8 @@ namespace Delphi.EditorTools
         }
 
         private void DrawRow(string label, string onPropName, string sensorPropName,
-                             Func<ChannelStatus> getStatus, string ratePropName = null)
+                             Func<ChannelStatus> getStatus, string ratePropName = null,
+                             string tooltip = null)
         {
             var onProp     = serializedObject.FindProperty(onPropName);
             var sensorProp = serializedObject.FindProperty(sensorPropName);
@@ -224,7 +298,9 @@ namespace Delphi.EditorTools
             const float labelWidth = 120f;
             Rect labelRect = GUILayoutUtility.GetRect(labelWidth, EditorGUIUtility.singleLineHeight,
                                                        GUILayout.Width(labelWidth));
-            EditorGUI.LabelField(labelRect, label);
+            // GUIContent carries the tooltip — hovering the label shows how the
+            // measure is calculated. null tooltip = no hover text (frame rows).
+            EditorGUI.LabelField(labelRect, new GUIContent(label, tooltip));
             if (!on)
             {
                 // No strikethrough FontStyle in IMGUI — draw the line by hand,

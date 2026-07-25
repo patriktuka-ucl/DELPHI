@@ -8,18 +8,22 @@ namespace Delphi
     /// </summary>
     public enum Channel
     {
-        HeartRate,
-        RMSSD,          // HRV
-        RespRate,
-        GSR,
-        BlinkRate,
-        Gaze,
-        PupilDiameter,
-        EEG,
-        Facial,
-        AccX,           // raw Polar H10 PMD accelerometer, milli-g
-        AccY,           // raw Polar H10 PMD accelerometer, milli-g
-        AccZ            // raw Polar H10 PMD accelerometer, milli-g
+        HeartRate,      // 0
+        RMSSD,          // 1  HRV
+        RespRate,       // 2
+        GSR,            // 3  raw, uncalibrated 0–1023 ADC
+        InterBlinkInterval, // 4  (was BlinkRate — kept at int 4)
+        Gaze,           // 5  gaze distance from baseline fixation point
+        PupilDiameter,  // 6
+        EEG,            // 7  RETIRED — no longer shown or sampled, but kept
+        Facial,         // 8  (with EEG) so enum INT values, and every recorded
+                        //    CSV / scene channelConfig keyed by them, stay
+                        //    valid. Do not reorder — APPEND ONLY below.
+        AccX,           // 9   raw Polar H10 PMD accelerometer, milli-g
+        AccY,           // 10  raw Polar H10 PMD accelerometer, milli-g
+        AccZ,           // 11  raw Polar H10 PMD accelerometer, milli-g
+        GsrTonic,       // 12  slow skin-conductance level: low-pass of raw GSR
+        GsrPhasic       // 13  fast skin-conductance response: raw GSR − tonic
     }
 
     /// <summary>
@@ -57,10 +61,11 @@ namespace Delphi
     [DefaultExecutionOrder(-1000)]
     public class DelphiManager : MonoBehaviour
     {
-        [Header("Gold-standard inputs")]
+        [Header("Contact sensors")]
         [Tooltip("Sample rate for this group of scalar sensors, Hz.")]
         [Range(1f, 240f)]
-        public float goldStandardRateHz = 60f;
+        [FormerlySerializedAs("goldStandardRateHz")]
+        public float contactRateHz = 60f;
         [SerializeField] private bool heartRateOn = true;
         [SerializeField] private ScalarSensor heartRate;
         [SerializeField] private bool hrvRmssdOn = true;
@@ -69,26 +74,28 @@ namespace Delphi
         [SerializeField] private ScalarSensor respRate;
         [SerializeField] private bool gsrOn = true;
         [SerializeField] private ScalarSensor gsr;
+        // GsrTonic + GsrPhasic are LIVE-DERIVED sub-signals of the raw GSR
+        // above (see GSRTonicSensor / GSRPhasicSensor). Raw is intentionally
+        // kept alongside them — we're comparing which drives the optimizer
+        // best, so all three are sampled and recorded.
+        [SerializeField] private bool gsrTonicOn = true;
+        [SerializeField] private ScalarSensor gsrTonic;
+        [SerializeField] private bool gsrPhasicOn = true;
+        [SerializeField] private ScalarSensor gsrPhasic;
 
-        [Header("Good additions")]
+        [Header("Gaze Metrics")]
         [Tooltip("Sample rate for this group of scalar sensors, Hz.")]
         [Range(1f, 240f)]
-        public float goodAdditionsRateHz = 60f;
-        [SerializeField] private bool blinkRateOn = true;
-        [SerializeField] private ScalarSensor blinkRate;
+        [FormerlySerializedAs("goodAdditionsRateHz")]
+        public float gazeRateHz = 60f;
+        [FormerlySerializedAs("blinkRateOn")]
+        [SerializeField] private bool blinkIntervalOn = true;
+        [FormerlySerializedAs("blinkRate")]
+        [SerializeField] private ScalarSensor blinkInterval;
         [SerializeField] private bool gazeOn = true;
         [SerializeField] private ScalarSensor gaze;
         [SerializeField] private bool pupilDiameterOn = true;
         [SerializeField] private ScalarSensor pupilDiameter;
-
-        [Header("Experimental")]
-        [Tooltip("Sample rate for this group of scalar sensors, Hz.")]
-        [Range(1f, 240f)]
-        public float experimentalRateHz = 60f;
-        [SerializeField] private bool eegOn = true;
-        [SerializeField] private ScalarSensor eeg;
-        [SerializeField] private bool facialOn = true;
-        [SerializeField] private ScalarSensor facial;
 
         [Header("IMU / Accelerometer")]
         [Tooltip("Sample rate for this group, Hz. Kept separate from " +
@@ -107,6 +114,20 @@ namespace Delphi
         [SerializeField] private ScalarSensor accY;
         [SerializeField] private bool accZOn = true;
         [SerializeField] private ScalarSensor accZ;
+
+        [Header("Debug")]
+        [Tooltip("DEBUG — bypass all real sensors: feed the constant below as " +
+                 "EVERY metric's reading, so a full session / BO loop runs with " +
+                 "no hardware. Turning this ON forces every channel's ON/OFF " +
+                 "toggle OFF (their prior states are remembered and restored " +
+                 "when you turn it back OFF). Drive it from the checkbox at the " +
+                 "top of the Inspector so the save/restore fires.")]
+        [SerializeField] private bool debugConstantFeed = false;
+        [Tooltip("Constant fed to every metric while Debug Constant Feed is on.")]
+        [SerializeField] private float debugValue = 3f;
+        // Snapshot of the per-channel ON toggles taken when debug was enabled,
+        // restored when it's disabled. Hidden — managed via SetDebugConstantFeed.
+        [SerializeField, HideInInspector] private bool[] _debugSavedOn;
 
         [Header("Video / frame inputs")]
         [Tooltip("Per-feed capture FPS. ALL rates in DELPHI live here on the " +
@@ -144,21 +165,23 @@ namespace Delphi
         // channel can't silently under-size this and throw/skip in Update().
         private readonly double[] _frameNext = new double[AllFrameChannels.Length];
 
-        private static readonly Channel[] GoldStandardChannels =
-            { Channel.HeartRate, Channel.RMSSD, Channel.RespRate, Channel.GSR };
-        private static readonly Channel[] GoodAdditionsChannels =
-            { Channel.BlinkRate, Channel.Gaze, Channel.PupilDiameter };
-        private static readonly Channel[] ExperimentalChannels =
-            { Channel.EEG, Channel.Facial };
+        private static readonly Channel[] ContactChannels =
+            { Channel.HeartRate, Channel.RMSSD, Channel.RespRate,
+              Channel.GSR, Channel.GsrTonic, Channel.GsrPhasic };
+        private static readonly Channel[] GazeChannels =
+            { Channel.InterBlinkInterval, Channel.Gaze, Channel.PupilDiameter };
         private static readonly Channel[] ImuChannels =
             { Channel.AccX, Channel.AccY, Channel.AccZ };
 
-        // Canonical display order for the dashboard.
+        // Canonical display / CSV-column order. EEG + Facial are intentionally
+        // absent (retired); the enum still defines them so old recordings and
+        // scene channelConfigs keyed by their int value stay valid.
         public static readonly Channel[] AllChannels =
         {
-            Channel.HeartRate, Channel.RMSSD, Channel.RespRate, Channel.GSR,
-            Channel.BlinkRate, Channel.Gaze, Channel.PupilDiameter,
-            Channel.EEG, Channel.Facial, Channel.AccX, Channel.AccY, Channel.AccZ
+            Channel.HeartRate, Channel.RMSSD, Channel.RespRate,
+            Channel.GSR, Channel.GsrTonic, Channel.GsrPhasic,
+            Channel.InterBlinkInterval, Channel.Gaze, Channel.PupilDiameter,
+            Channel.AccX, Channel.AccY, Channel.AccZ
         };
 
         public static readonly FrameChannel[] AllFrameChannels =
@@ -175,12 +198,17 @@ namespace Delphi
         public bool IsInPlayback => Playback != null && Playback.IsLoaded;
 
         // ── Public API — scalar channels ────────────────────────────────
+        // Debug Constant Feed (see the Debug fields) overrides EVERYTHING:
+        // every channel reports the constant, is Live, and has data — so the
+        // dashboard and the whole BO pipeline run with no hardware attached.
         public bool HasData(Channel ch) =>
+            debugConstantFeed ? true :
             IsInPlayback ? Playback.HasData(ch)
                          : IsOn(ch) && Slot(ch) != null && !float.IsNaN(Slot(ch).Current);
 
         public float GetValue(Channel ch)
         {
+            if (debugConstantFeed) return debugValue;
             if (IsInPlayback) return Playback.GetValue(ch);
             if (!IsOn(ch)) return float.NaN;
             var s = Slot(ch);
@@ -189,6 +217,7 @@ namespace Delphi
 
         public ChannelStatus GetStatus(Channel ch)
         {
+            if (debugConstantFeed) return ChannelStatus.Live;
             if (IsInPlayback) return Playback.HasData(ch) ? ChannelStatus.Live : ChannelStatus.NotAttached;
             var s = Slot(ch);
             if (s == null) return ChannelStatus.NotAttached;
@@ -203,19 +232,20 @@ namespace Delphi
 
         public static (string label, string unit) Meta(Channel ch) => ch switch
         {
-            Channel.HeartRate     => ("HR",                    "bpm"),
-            Channel.RMSSD         => ("HRV-RMSSD",             "ms"),
-            Channel.RespRate      => ("Resp. rate",            "br/m"),
-            Channel.GSR           => ("GSR",                   "raw10bit"),
-            Channel.BlinkRate     => ("Blink rate",            "bl/m"),
-            Channel.Gaze          => ("Gaze / Saccade rate",   ""),
-            Channel.PupilDiameter => ("Pupil diameter",        "mm"),
-            Channel.EEG           => ("EEG",                   "µV"),
-            Channel.Facial        => ("Facial affect",         ""),
-            Channel.AccX          => ("Acc X",                 "mG"),
-            Channel.AccY          => ("Acc Y",                 "mG"),
-            Channel.AccZ          => ("Acc Z",                 "mG"),
-            _                     => (ch.ToString(),           "")
+            Channel.HeartRate     => ("HR",             "bpm"),
+            Channel.RMSSD         => ("HRV-RMSSD",       "ms"),
+            Channel.RespRate      => ("Resp. rate",      "br/m"),
+            Channel.GSR           => ("GSR",             "raw10bit"),
+            Channel.GsrTonic      => ("GSR tonic",       "raw"),
+            Channel.GsrPhasic     => ("GSR phasic",      "raw"),
+            Channel.InterBlinkInterval => ("Inter-blink interval",   "s"),
+            Channel.Gaze          => ("Gaze distance",         "°"),
+            Channel.PupilDiameter => ("Pupil diameter",  "mm"),
+            Channel.AccX          => ("Acc X",           "mG"),
+            Channel.AccY          => ("Acc Y",           "mG"),
+            Channel.AccZ          => ("Acc Z",           "mG"),
+            // EEG + Facial are retired; the default handles them.
+            _                     => (ch.ToString(),     "")
         };
 
         // ── Public API — frame channels ─────────────────────────────────
@@ -257,12 +287,12 @@ namespace Delphi
 
         private void OnEnable()
         {
+            if (debugConstantFeed) EnsureDebugSensor();
             _coreGroups = new[]
             {
-                new DelphiCore.Group { channels = GoldStandardChannels,  rateHz = goldStandardRateHz },
-                new DelphiCore.Group { channels = GoodAdditionsChannels, rateHz = goodAdditionsRateHz },
-                new DelphiCore.Group { channels = ExperimentalChannels,  rateHz = experimentalRateHz },
-                new DelphiCore.Group { channels = ImuChannels,           rateHz = imuRateHz },
+                new DelphiCore.Group { channels = ContactChannels, rateHz = contactRateHz },
+                new DelphiCore.Group { channels = GazeChannels,    rateHz = gazeRateHz },
+                new DelphiCore.Group { channels = ImuChannels,     rateHz = imuRateHz },
             };
             _core = new DelphiCore(_coreGroups, AllChannels, Slot, IsOn);
             _core.Start();
@@ -295,17 +325,100 @@ namespace Delphi
 
             if (_coreGroups != null)
             {
-                _coreGroups[0].rateHz = goldStandardRateHz;
-                _coreGroups[1].rateHz = goodAdditionsRateHz;
-                _coreGroups[2].rateHz = experimentalRateHz;
-                _coreGroups[3].rateHz = imuRateHz;
+                _coreGroups[0].rateHz = contactRateHz;
+                _coreGroups[1].rateHz = gazeRateHz;
+                _coreGroups[2].rateHz = imuRateHz;
+            }
+
+            // Keep the debug source's constant in sync with live edits.
+            if (debugConstantFeed && _debugSensor != null) _debugSensor.value = debugValue;
+        }
+
+        // ── Debug constant feed ─────────────────────────────────────────
+        // Public read for the pipeline (SessionController/UI) and control for
+        // the custom Inspector checkbox.
+        public bool DebugConstantFeed => debugConstantFeed;
+        public float DebugValue => debugValue;
+
+        // A single hidden ConstantSensor, spawned in Play mode, that every
+        // channel's slot resolves to while debug is on — so DelphiCore samples
+        // the constant into the accumulator (baseline + windows) exactly like a
+        // real sensor, and recordings/objectives all see it.
+        private ConstantSensor _debugSensor;
+
+        private void EnsureDebugSensor()
+        {
+            if (!Application.isPlaying) return;
+            if (_debugSensor != null) { _debugSensor.value = debugValue; return; }
+            var go = new GameObject("[DebugConstantSensor]") { hideFlags = HideFlags.HideAndDontSave };
+            go.transform.SetParent(transform, false);
+            _debugSensor = go.AddComponent<ConstantSensor>();
+            _debugSensor.value = debugValue;
+        }
+
+        /// <summary>Turn the debug constant feed on/off. Enabling snapshots then
+        /// clears every channel's ON toggle; disabling restores the snapshot.
+        /// Called by the custom Inspector; safe to call from code too.</summary>
+        public void SetDebugConstantFeed(bool on)
+        {
+            if (on == debugConstantFeed)
+            {
+                if (_debugSensor != null) _debugSensor.value = debugValue;
+                return;
+            }
+            if (on)
+            {
+                SnapshotAndClearToggles();
+                debugConstantFeed = true;
+                EnsureDebugSensor();
+            }
+            else
+            {
+                debugConstantFeed = false;
+                RestoreToggles();
+            }
+        }
+
+        private void SnapshotAndClearToggles()
+        {
+            _debugSavedOn = new bool[AllChannels.Length];
+            for (int i = 0; i < AllChannels.Length; i++)
+            {
+                _debugSavedOn[i] = IsOnRaw(AllChannels[i]);
+                SetOn(AllChannels[i], false);
+            }
+        }
+
+        private void RestoreToggles()
+        {
+            if (_debugSavedOn == null || _debugSavedOn.Length != AllChannels.Length) return;
+            for (int i = 0; i < AllChannels.Length; i++)
+                SetOn(AllChannels[i], _debugSavedOn[i]);
+            _debugSavedOn = null;
+        }
+
+        private void SetOn(Channel ch, bool v)
+        {
+            switch (ch)
+            {
+                case Channel.HeartRate:          heartRateOn = v;     break;
+                case Channel.RMSSD:              hrvRmssdOn = v;      break;
+                case Channel.RespRate:           respRateOn = v;      break;
+                case Channel.GSR:                gsrOn = v;           break;
+                case Channel.GsrTonic:           gsrTonicOn = v;      break;
+                case Channel.GsrPhasic:          gsrPhasicOn = v;     break;
+                case Channel.InterBlinkInterval: blinkIntervalOn = v; break;
+                case Channel.Gaze:               gazeOn = v;          break;
+                case Channel.PupilDiameter:      pupilDiameterOn = v; break;
+                case Channel.AccX:               accXOn = v;          break;
+                case Channel.AccY:               accYOn = v;          break;
+                case Channel.AccZ:               accZOn = v;          break;
             }
         }
 
         /// <summary>Fastest configured scalar rate — the csv row rate.</summary>
         public float MaxScalarRateHz =>
-            Mathf.Max(1f, Mathf.Max(goldStandardRateHz,
-                      Mathf.Max(goodAdditionsRateHz, Mathf.Max(experimentalRateHz, imuRateHz))));
+            Mathf.Max(1f, Mathf.Max(contactRateHz, Mathf.Max(gazeRateHz, imuRateHz)));
 
         /// <summary>The commanded capture rate for a frame feed — the ONLY
         /// place video rates are configured. The recorder encodes each mp4
@@ -319,35 +432,42 @@ namespace Delphi
             _                          => 30f
         });
 
-        // Map a channel to its serialized slot.
-        private ScalarSensor Slot(Channel ch) => ch switch
+        // Map a channel to its slot. In debug, every channel resolves to the
+        // one constant sensor (so DelphiCore samples the constant everywhere).
+        private ScalarSensor Slot(Channel ch) =>
+            debugConstantFeed && _debugSensor != null ? _debugSensor : SlotRaw(ch);
+
+        private ScalarSensor SlotRaw(Channel ch) => ch switch
         {
             Channel.HeartRate     => heartRate,
             Channel.RMSSD         => hrvRmssd,
             Channel.RespRate      => respRate,
             Channel.GSR           => gsr,
-            Channel.BlinkRate     => blinkRate,
+            Channel.GsrTonic      => gsrTonic,
+            Channel.GsrPhasic     => gsrPhasic,
+            Channel.InterBlinkInterval => blinkInterval,
             Channel.Gaze          => gaze,
             Channel.PupilDiameter => pupilDiameter,
-            Channel.EEG           => eeg,
-            Channel.Facial        => facial,
             Channel.AccX          => accX,
             Channel.AccY          => accY,
             Channel.AccZ          => accZ,
             _                     => null
         };
 
-        private bool IsOn(Channel ch) => ch switch
+        // In debug every channel samples (regardless of the cleared toggles).
+        private bool IsOn(Channel ch) => debugConstantFeed || IsOnRaw(ch);
+
+        private bool IsOnRaw(Channel ch) => ch switch
         {
             Channel.HeartRate     => heartRateOn,
             Channel.RMSSD         => hrvRmssdOn,
             Channel.RespRate      => respRateOn,
             Channel.GSR           => gsrOn,
-            Channel.BlinkRate     => blinkRateOn,
+            Channel.GsrTonic      => gsrTonicOn,
+            Channel.GsrPhasic     => gsrPhasicOn,
+            Channel.InterBlinkInterval => blinkIntervalOn,
             Channel.Gaze          => gazeOn,
             Channel.PupilDiameter => pupilDiameterOn,
-            Channel.EEG           => eegOn,
-            Channel.Facial        => facialOn,
             Channel.AccX          => accXOn,
             Channel.AccY          => accYOn,
             Channel.AccZ          => accZOn,

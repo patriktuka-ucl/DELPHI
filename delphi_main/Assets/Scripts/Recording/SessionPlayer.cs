@@ -230,6 +230,13 @@ namespace Delphi
         }
 
         // ── Data access (routed through DelphiManager) ──────────────────
+        /// <summary>Whether the loaded recording contains this channel AT ALL —
+        /// stable across the whole recording, unlike <see cref="HasData"/>,
+        /// which is per-instant. Used to decide which dashboard cells to show
+        /// during playback (so a momentarily-NaN sample doesn't flicker a cell
+        /// out of the grid).</summary>
+        public bool HasChannel(Channel ch) => IsLoaded && _values.ContainsKey(ch);
+
         public bool HasData(Channel ch) =>
             IsLoaded && _values.ContainsKey(ch) && !float.IsNaN(GetValue(ch));
 

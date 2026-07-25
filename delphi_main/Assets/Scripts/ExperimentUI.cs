@@ -258,6 +258,8 @@ namespace Delphi
             public bool isFrame;
             public Channel channel;
             public FrameChannel frameChannel;
+            public GameObject cell;        // the whole grid cell (shown/hidden + moved)
+            public RectTransform cellRt;
             public Text title, value;
             public RawImage image;
             public Texture2D tex;
@@ -268,6 +270,16 @@ namespace Delphi
         }
         private readonly List<Panel> _panels = new();
         private int _cellW = 210, _cellH = 54;
+
+        // Grid layout — shared by BuildSensorGrid and RelayoutGrid so the live
+        // reflow lands cells in exactly the same slots the initial build uses.
+        private const int GridCols = 4;
+        private const float GridX0 = 496, GridY0 = -60, GridColGap = 14, GridRowGap = 12;
+        private const float GridTitleH = 18, GridValH = 16;
+        private float GridRowH => _cellH + GridTitleH + GridValH;
+        // Bit i = panel i is active. Recomputed each redraw; the grid only
+        // reflows when this changes, so a steady set costs one long compare.
+        private long _lastLayoutSig = -1;
         private string _lastPlaybackSig;
 
         private Color32 WaveColor => manager.IsInPlayback ? _wavePlay : _wave;
@@ -275,11 +287,54 @@ namespace Delphi
 
         private void RefreshSensors()
         {
+            // Show only the sensors that are actually active, packed with no
+            // gaps — the grid reflows responsively as slots are toggled on/off
+            // or (during playback) as the recording's channel set differs.
+            RelayoutGrid();
+
             string sig = manager.IsInPlayback ? manager.Playback.LoadedPath : null;
             if (sig != _lastPlaybackSig) { _lastPlaybackSig = sig; foreach (var p in _panels) if (!p.isFrame) ClearHistory(p); }
 
             foreach (var p in _panels)
+            {
+                if (!p.cell.activeSelf) continue;   // hidden = inactive, skip
                 if (p.isFrame) RefreshFrame(p); else RefreshScalar(p);
+            }
+        }
+
+        // "Active" = a sensor is plugged in AND its toggle is on (Live or the
+        // transient NoSignal). Off (Disabled) or empty (NotAttached) slots are
+        // hidden. During playback we key off whether the recording HAS the
+        // channel at all — stable, so a momentary NaN can't flicker a cell out.
+        private bool IsPanelActive(Panel p)
+        {
+            if (manager.IsInPlayback)
+                return p.isFrame ? manager.Playback.HasFrame(p.frameChannel)
+                                 : manager.Playback.HasChannel(p.channel);
+            var st = p.isFrame ? manager.GetStatus(p.frameChannel)
+                               : manager.GetStatus(p.channel);
+            return st == ChannelStatus.Live || st == ChannelStatus.NoSignal;
+        }
+
+        private void RelayoutGrid()
+        {
+            long sig = 0; int bit = 0;
+            foreach (var p in _panels) { if (IsPanelActive(p)) sig |= 1L << bit; bit++; }
+            if (sig == _lastLayoutSig) return; // set unchanged — nothing to move
+            _lastLayoutSig = sig;
+
+            int idx = 0;
+            foreach (var p in _panels)
+            {
+                bool active = IsPanelActive(p);
+                if (p.cell.activeSelf != active) p.cell.SetActive(active);
+                if (!active) continue;
+                int col = idx % GridCols, row = idx / GridCols;
+                p.cellRt.anchoredPosition = new Vector2(
+                    GridX0 + col * (_cellW + GridColGap),
+                    GridY0 - row * (GridRowH + GridRowGap));
+                idx++;
+            }
         }
 
         private void RefreshScalar(Panel p)
@@ -625,13 +680,14 @@ namespace Delphi
         {
             var scalar = DelphiManager.AllChannels; var frame = DelphiManager.AllFrameChannels;
             int total = scalar.Length + frame.Length;
-            const int cols = 4; const float x0 = 496, y0 = -60, colGap = 14, rowGap = 12;
-            float titleH = 18, valH = 16, rowH = _cellH + titleH + valH;
+            float titleH = GridTitleH, valH = GridValH, rowH = GridRowH;
 
             for (int i = 0; i < total; i++)
             {
-                int col = i % cols, row = i / cols;
-                float px = x0 + col * (_cellW + colGap), py = y0 - row * (rowH + rowGap);
+                // Initial position is provisional — RelayoutGrid() below packs
+                // the ACTIVE cells with no gaps and hides the rest.
+                int col = i % GridCols, row = i / GridCols;
+                float px = GridX0 + col * (_cellW + GridColGap), py = GridY0 - row * (rowH + GridRowGap);
                 bool isFrame = i >= scalar.Length;
                 string label = isFrame ? DelphiManager.FrameMeta(frame[i - scalar.Length]).label
                                        : DelphiManager.Meta(scalar[i]).label;
@@ -648,7 +704,7 @@ namespace Delphi
                 irt.anchorMin = irt.anchorMax = new Vector2(0, 1); irt.pivot = new Vector2(0, 1);
                 irt.anchoredPosition = new Vector2(0, -(titleH + valH)); irt.sizeDelta = new Vector2(_cellW, _cellH);
 
-                var panel = new Panel { isFrame = isFrame, title = t, value = v, image = raw };
+                var panel = new Panel { isFrame = isFrame, cell = cont, cellRt = crt, title = t, value = v, image = raw };
                 if (isFrame)
                 {
                     panel.frameChannel = frame[i - scalar.Length];
@@ -664,6 +720,10 @@ namespace Delphi
                 }
                 _panels.Add(panel);
             }
+
+            // Pack active cells and hide inactive ones from the start, so the
+            // grid opens showing only what's live rather than every empty slot.
+            RelayoutGrid();
         }
 
         private void BuildTransport(Transform root)

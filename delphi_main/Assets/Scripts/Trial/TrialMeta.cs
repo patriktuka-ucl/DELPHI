@@ -53,7 +53,7 @@ namespace Delphi.Trial
 
         /// <summary>DelphiManager's scalar-group sample rates at trial start —
         /// the acquisition rate behind every objective below.</summary>
-        public float goldStandardRateHz, goodAdditionsRateHz, experimentalRateHz;
+        public float contactRateHz, gazeRateHz;
 
         /// <summary>Sensor-shaped objectives (Physiology trials) — empty for
         /// Questionnaire trials, which use questionnaireObjectiveKeys below

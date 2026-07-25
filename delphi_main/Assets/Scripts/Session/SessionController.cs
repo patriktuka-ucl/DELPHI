@@ -1560,9 +1560,8 @@ namespace Delphi.Session
 
                     sessionRecordingPath = sessionPath ?? "",
 
-                    goldStandardRateHz = manager != null ? manager.goldStandardRateHz : 0f,
-                    goodAdditionsRateHz = manager != null ? manager.goodAdditionsRateHz : 0f,
-                    experimentalRateHz = manager != null ? manager.experimentalRateHz : 0f,
+                    contactRateHz = manager != null ? manager.contactRateHz : 0f,
+                    gazeRateHz = manager != null ? manager.gazeRateHz : 0f,
 
                     objectives = objectives.ToArray(),
                     objectiveSource = _objectiveSource.ToString(),
