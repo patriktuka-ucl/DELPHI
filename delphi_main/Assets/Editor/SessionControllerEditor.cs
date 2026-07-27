@@ -156,13 +156,9 @@ namespace Delphi.EditorTools
             EditorGUILayout.BeginVertical("box");
 
             var cfgProp = serializedObject.FindProperty(configFieldName);
-            var baselineProp = cfgProp.FindPropertyRelative("baselineSeconds");
-            var baselineAvgProp = cfgProp.FindPropertyRelative("baselineAveragingSeconds");
             var iterationsProp = cfgProp.FindPropertyRelative("iterations");
             var samplingProp = cfgProp.FindPropertyRelative("samplingIterations");
 
-            EditorGUILayout.PropertyField(baselineProp, new GUIContent("Baseline (s)"));
-            EditorGUILayout.PropertyField(baselineAvgProp, new GUIContent("Baseline averaging (s)"));
             EditorGUILayout.PropertyField(iterationsProp, new GUIContent("Iterations"));
             EditorGUILayout.PropertyField(samplingProp, new GUIContent("Sampling iterations"));
 
@@ -170,13 +166,19 @@ namespace Delphi.EditorTools
             float washout = Mathf.Min(ctrl.washoutSeconds, ctrl.windowSeconds);
             float measure = ctrl.MeasureSeconds;
             double driveSeconds = (double)iterationsProp.intValue * window;
-            double totalSeconds = baselineProp.floatValue + driveSeconds;
 
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField(
-                $"Baseline {Fmt(baselineProp.floatValue)}  +  " +
-                $"{iterationsProp.intValue} × {Fmt(window)}  =  {Fmt(totalSeconds)} total",
+                $"Drive: {iterationsProp.intValue} × {Fmt(window)}  =  {Fmt(driveSeconds)}",
                 EditorStyles.largeLabel);
+            // The baseline is session-level now (it lives inside the shared
+            // meditation track), so it isn't part of this per-condition panel —
+            // but it IS part of the wall-clock time, so say so here rather
+            // than let the number read as the whole condition.
+            EditorGUILayout.LabelField(
+                $"+ the meditation before it, which is where the baseline is measured " +
+                $"({Fmt(ctrl.baselineWindowSeconds)} window, ending {Fmt(ctrl.baselineWindowEndOffsetSeconds)} " +
+                "before the track ends)");
             EditorGUILayout.LabelField(
                 $"Per iteration: {Fmt(washout)} washout" +
                 (kind == SessionController.ConditionKind.Explicit
