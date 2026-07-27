@@ -31,6 +31,11 @@ namespace Delphi
         [Header("Requested format (the driver may pick the closest match)")]
         public int requestedWidth  = 1280;
         public int requestedHeight = 720;
+        [Tooltip("Without this, Unity's WebCamTexture doesn't ask the driver " +
+                 "for a target rate and can silently fall back to a much " +
+                 "lower default capture mode even when the device (and its " +
+                 "own OS app) is capable of far more.")]
+        public int requestedFps    = 60;
 
         private WebCamTexture _tex;
         private RenderTexture _rt;    // manager-paced copy — what consumers actually see
@@ -125,7 +130,7 @@ namespace Delphi
             }
 
             Debug.Log($"[WebcamSensor] Found {devices.Length} device(s), using '{device}'.", this);
-            _tex = new WebCamTexture(device, requestedWidth, requestedHeight);
+            _tex = new WebCamTexture(device, requestedWidth, requestedHeight, requestedFps);
             _tex.Play();
         }
 

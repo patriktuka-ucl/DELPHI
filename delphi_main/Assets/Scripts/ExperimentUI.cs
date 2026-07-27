@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.InputSystem;
@@ -104,6 +105,7 @@ namespace Delphi
             HandleKeyboard();
             RefreshSessionCard();
             RefreshTrialCard();
+            RefreshBaselineCard();
             RefreshTransport();
             PollEvents();
 
@@ -124,7 +126,7 @@ namespace Delphi
         private Text[] _condTime  = new Text[3];
         private Slider _condBar;
         private Button _qDoneBtn, _breakBtn, _continueBtn, _resumeBreakBtn,
-                       _endFreePlayBtn, _estopBtn, _estopResumeBtn;
+                       _endFreePlayBtn, _nudgeBtn, _estopBtn, _estopResumeBtn;
         private Text _estopBanner;
 
         private void RefreshSessionCard()
@@ -158,24 +160,32 @@ namespace Delphi
                 double pr = session.PhaseSecondsRemaining;
                 _statusTxt.text = session.StatusLine + (pr > 0 ? $"   {Mmss((float)pr)} left" : "");
 
-                int activeSlot = session.ActiveConditionSlot;
                 bool roaming = phase == SessionController.Phase.FreePlay;
+                // A slot is "done" only once the session has actually MOVED
+                // ON past it (BreakOffer between conditions, or Complete after
+                // the last one) — not merely because the BO iteration loop
+                // isn't running right now, which is equally true during that
+                // SAME condition's own intro/meditation/questionnaire and
+                // used to mark a condition "done" before it had even started.
+                bool sessionMovedOn = phase == SessionController.Phase.BreakOffer
+                                   || phase == SessionController.Phase.Complete;
                 for (int s = 0; s < _condLabel.Length; s++)
                 {
                     var kind = session.ConditionKindAt(s);
                     _condLabel[s].text = $"Cond {s + 1}: {kind}";
-                    // FreeRoam is open-ended, so it counts as "running" while
-                    // the roam phase is live — IsRunningCondition only covers
-                    // the BO baseline/iteration loop, which FreeRoam has none of.
-                    bool isActive = s == activeSlot && (session.IsRunningCondition || roaming);
-                    bool isDone = session.ConditionNumber > s + 1 ||
-                                  (session.ConditionNumber == s + 1 && !session.IsRunningCondition && !roaming);
+
+                    bool isThisSlot = session.ConditionNumber == s + 1;
+                    bool isDone = session.ConditionNumber > s + 1 || (isThisSlot && sessionMovedOn);
+                    bool isActive = isThisSlot && !isDone;
+
                     if (isActive)
                     {
                         _condLabel[s].color = _condTime[s].color = _running;
                         _condTime[s].text = kind == SessionController.ConditionKind.FreeRoam
-                            ? "running · open-ended"
-                            : $"running · ~{Mmss(session.CurrentConditionSecondsRemaining())} left";
+                            ? (roaming ? "running · open-ended" : "starting…")
+                            : session.IsRunningCondition
+                                ? $"running · ~{Mmss(session.CurrentConditionSecondsRemaining())} left"
+                                : "starting…";
                     }
                     else if (isDone)
                     {
@@ -203,6 +213,7 @@ namespace Delphi
             Show(_continueBtn, phase == SessionController.Phase.BreakOffer && !session.AwaitingBreakResume);
             Show(_resumeBreakBtn, phase == SessionController.Phase.BreakOffer && session.AwaitingBreakResume);
             Show(_endFreePlayBtn, phase == SessionController.Phase.FreePlay);
+            Show(_nudgeBtn, phase == SessionController.Phase.FreePlay);
             Show(_estopBtn, active);
             Show(_estopResumeBtn, stopped);
             _estopBanner.gameObject.SetActive(stopped);
@@ -316,6 +327,9 @@ namespace Delphi
             return st == ChannelStatus.Live || st == ChannelStatus.NoSignal;
         }
 
+        // Scalar and frame panels each pack within THEIR OWN box now (see
+        // BuildSensorGrid) — local coordinates relative to that box's
+        // top-left, starting just below its header.
         private void RelayoutGrid()
         {
             long sig = 0; int bit = 0;
@@ -323,16 +337,23 @@ namespace Delphi
             if (sig == _lastLayoutSig) return; // set unchanged — nothing to move
             _lastLayoutSig = sig;
 
+            PackSection(isFrame: false);
+            PackSection(isFrame: true);
+        }
+
+        private void PackSection(bool isFrame)
+        {
             int idx = 0;
             foreach (var p in _panels)
             {
+                if (p.isFrame != isFrame) continue;
                 bool active = IsPanelActive(p);
                 if (p.cell.activeSelf != active) p.cell.SetActive(active);
                 if (!active) continue;
                 int col = idx % GridCols, row = idx / GridCols;
                 p.cellRt.anchoredPosition = new Vector2(
-                    GridX0 + col * (_cellW + GridColGap),
-                    GridY0 - row * (GridRowH + GridRowGap));
+                    SectionContentX + col * (_cellW + GridColGap),
+                    SectionContentY - row * (GridRowH + GridRowGap));
                 idx++;
             }
         }
@@ -527,6 +548,7 @@ namespace Delphi
         // ════════════════════════════════════════════════════════════════
         private readonly List<string> _log = new();
         private Text _logText;
+        private Text _baselineText;
         private SessionController.Phase _lastPhase = (SessionController.Phase)(-1);
         private int _lastIter = -1;
 
@@ -587,6 +609,7 @@ namespace Delphi
 
             BuildSessionCard(_root);
             BuildTrialCard(_root);
+            BuildBaselineCard(_root);
             BuildEventLog(_root);
             BuildSensorGrid(_root);
             BuildTransport(_root);
@@ -594,7 +617,7 @@ namespace Delphi
 
         private void BuildSessionCard(Transform root)
         {
-            var card = Card(root, "SESSION", new Vector2(24, -60), new Vector2(452, 300));
+            var card = Card(root, "Session", new Vector2(24, -60), new Vector2(452, 300));
             var host = card.transform;
 
             _preGroup = Empty(host, "pre");
@@ -644,7 +667,10 @@ namespace Delphi
             _breakBtn = BtnObj(host, "BREAK", new Vector2(16, -178), new Vector2(205, 38), () => session.ChooseBreak());
             _continueBtn = BtnObj(host, "CONTINUE", new Vector2(233, -178), new Vector2(205, 38), () => session.ChooseContinue());
             _resumeBreakBtn = BtnObj(host, "RESUME NEXT CONDITION", pos, wide, () => session.ResumeFromBreak());
-            _endFreePlayBtn = BtnObj(host, "END FREE-PLAY", pos, wide, () => session.EndFreePlay());
+            // Explore condition only — shares the row with END FREE-PLAY, the
+            // same way BREAK/CONTINUE split it.
+            _nudgeBtn = BtnObj(host, "PLAY EXPLORE NUDGE", new Vector2(16, -178), new Vector2(205, 38), () => session.PlayExploreNudge());
+            _endFreePlayBtn = BtnObj(host, "END FREE-PLAY", new Vector2(233, -178), new Vector2(205, 38), () => session.EndFreePlay());
 
             var estopImg = Btn(host, "EMERGENCY STOP", new Vector2(16, -240), new Vector2(422, 46), () => session.EmergencyStop(), out _);
             _estopBtn = estopImg.GetComponent<Button>(); estopImg.color = _estop;
@@ -655,7 +681,7 @@ namespace Delphi
 
         private void BuildTrialCard(Transform root)
         {
-            var card = Card(root, "TRIAL  (run by the session)", new Vector2(24, -372), new Vector2(452, 236));
+            var card = Card(root, "Trial Progress — driven by the session automatically", new Vector2(24, -372), new Vector2(452, 236));
             var host = card.transform;
             _optDot = Dot(host, new Vector2(16, -32)); _optLabel = Txt(host, "optimizer: idle", 13, _pending, new Vector2(34, -30), new Vector2(404, 20));
             _iterTxt = Txt(host, "iteration — / —", 14, _dim, new Vector2(16, -54), new Vector2(240, 22));
@@ -669,61 +695,117 @@ namespace Delphi
             }
         }
 
+        // Sits right below the Trial card (which ends at y=-372-236=-608).
+        private const float BaselineCardY = -616, BaselineCardH = 152;
+
+        private void BuildBaselineCard(Transform root)
+        {
+            var card = Card(root, "Baseline — captured during the meditation", new Vector2(24, BaselineCardY), new Vector2(452, BaselineCardH));
+            _baselineText = Txt(card.transform, "No baseline captured yet.", 12, _dim, new Vector2(16, -32), new Vector2(422, BaselineCardH - 42));
+            _baselineText.alignment = TextAnchor.UpperLeft;
+        }
+
+        private void RefreshBaselineCard()
+        {
+            if (session == null || _baselineText == null) return;
+
+            var readings = session.LastBaselineReadings;
+            if (readings == null || readings.Count == 0)
+            {
+                _baselineText.text = "No baseline captured yet.";
+                return;
+            }
+
+            var sb = new StringBuilder();
+            sb.Append($"Condition {session.LastBaselineConditionNumber} ({session.LastBaselineConditionKind})\n");
+            foreach (var r in readings)
+            {
+                var (label, unit) = DelphiManager.Meta(r.channel);
+                sb.Append($"{label,-16} {r.mean,8:F2} {unit}  ({r.sampleCount} smp)  " +
+                          $"[{r.lowerBound:F2}, {r.upperBound:F2}]\n");
+            }
+            if (session.LastBaselineMissingChannels.Count > 0)
+                sb.Append($"No samples: {string.Join(", ", session.LastBaselineMissingChannels)}\n");
+
+            _baselineText.text = sb.ToString();
+        }
+
+        // EVENT LOG sits below BASELINE now, not directly below TRIAL.
         private void BuildEventLog(Transform root)
         {
-            var card = Card(root, "EVENT LOG", new Vector2(24, -616), new Vector2(452, 300));
+            float y = BaselineCardY - BaselineCardH - 8;
+            var card = Card(root, "Event Log", new Vector2(24, y), new Vector2(452, 300));
             _logText = Txt(card.transform, "", 12, _dim, new Vector2(16, -32), new Vector2(422, 258));
             _logText.alignment = TextAnchor.UpperLeft;
         }
 
+        // Cells pack starting just below each box's own header (see Card()).
+        private const float SectionContentX = 16f, SectionContentY = -(CardHeaderH + 8f);
+
+        /// <summary>Two clearly separate, individually labelled boxes — one
+        /// for scalar (physiological/behavioral) channels, one for camera
+        /// feeds — instead of one undifferentiated mixed grid, so it's
+        /// obvious at a glance which kind of sensor a cell is without reading
+        /// each label individually.</summary>
         private void BuildSensorGrid(Transform root)
         {
             var scalar = DelphiManager.AllChannels; var frame = DelphiManager.AllFrameChannels;
-            int total = scalar.Length + frame.Length;
-            float titleH = GridTitleH, valH = GridValH, rowH = GridRowH;
 
-            for (int i = 0; i < total; i++)
-            {
-                // Initial position is provisional — RelayoutGrid() below packs
-                // the ACTIVE cells with no gaps and hides the rest.
-                int col = i % GridCols, row = i / GridCols;
-                float px = GridX0 + col * (_cellW + GridColGap), py = GridY0 - row * (rowH + GridRowGap);
-                bool isFrame = i >= scalar.Length;
-                string label = isFrame ? DelphiManager.FrameMeta(frame[i - scalar.Length]).label
-                                       : DelphiManager.Meta(scalar[i]).label;
+            int scalarRows = Mathf.Max(1, Mathf.CeilToInt(scalar.Length / (float)GridCols));
+            int frameRows = Mathf.Max(1, Mathf.CeilToInt(frame.Length / (float)GridCols));
+            float boxW = GridCols * (_cellW + GridColGap) - GridColGap + 32f;
+            float scalarBoxH = CardHeaderH + scalarRows * GridRowH + (scalarRows - 1) * GridRowGap + 16f;
+            float frameBoxH = CardHeaderH + frameRows * GridRowH + (frameRows - 1) * GridRowGap + 16f;
 
-                var cont = Empty(root, $"Cell_{label}"); var crt = cont.GetComponent<RectTransform>();
-                crt.anchoredPosition = new Vector2(px, py); crt.sizeDelta = new Vector2(_cellW, rowH);
+            var scalarBox = Card(root, "Scalar Sensors — physiological & behavioral signals",
+                new Vector2(GridX0, GridY0), new Vector2(boxW, scalarBoxH));
+            var frameBox = Card(root, "Frame Sensors — camera / video feeds",
+                new Vector2(GridX0, GridY0 - scalarBoxH - 16f), new Vector2(boxW, frameBoxH));
 
-                var t = Txt(cont.transform, label.TrimEnd(' ', '(', ')'), 13, new Color(0.8f,0.85f,0.95f), new Vector2(0, 0), new Vector2(_cellW, titleH));
-                var v = Txt(cont.transform, "…", 12, _pending, new Vector2(0, -titleH), new Vector2(_cellW, valH)); v.alignment = TextAnchor.UpperRight;
+            for (int i = 0; i < scalar.Length; i++)
+                _panels.Add(BuildSensorCell(scalarBox, isFrame: false, channel: scalar[i], frameChannel: default));
+            for (int i = 0; i < frame.Length; i++)
+                _panels.Add(BuildSensorCell(frameBox, isFrame: true, channel: default, frameChannel: frame[i]));
 
-                var imgGO = new GameObject("Content", typeof(RawImage)); imgGO.transform.SetParent(cont.transform, false);
-                var raw = imgGO.GetComponent<RawImage>(); raw.color = Color.white;
-                var irt = imgGO.GetComponent<RectTransform>();
-                irt.anchorMin = irt.anchorMax = new Vector2(0, 1); irt.pivot = new Vector2(0, 1);
-                irt.anchoredPosition = new Vector2(0, -(titleH + valH)); irt.sizeDelta = new Vector2(_cellW, _cellH);
-
-                var panel = new Panel { isFrame = isFrame, cell = cont, cellRt = crt, title = t, value = v, image = raw };
-                if (isFrame)
-                {
-                    panel.frameChannel = frame[i - scalar.Length];
-                    var ph = new Texture2D(2, 2); ph.SetPixels(new[] { (Color)_panelBg, (Color)_panelBg, (Color)_panelBg, (Color)_panelBg }); ph.Apply(); raw.texture = ph;
-                }
-                else
-                {
-                    panel.channel = scalar[i];
-                    panel.tex = new Texture2D(_cellW, _cellH, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
-                    panel.buffer = new Color32[_cellW * _cellH]; panel.history = new float[_cellW];
-                    for (int x = 0; x < _cellW; x++) panel.history[x] = float.NaN;
-                    raw.texture = panel.tex; Apply(panel);
-                }
-                _panels.Add(panel);
-            }
-
-            // Pack active cells and hide inactive ones from the start, so the
-            // grid opens showing only what's live rather than every empty slot.
+            // Pack active cells and hide inactive ones from the start, so each
+            // box opens showing only what's live rather than every empty slot.
             RelayoutGrid();
+        }
+
+        private Panel BuildSensorCell(Transform parent, bool isFrame, Channel channel, FrameChannel frameChannel)
+        {
+            float titleH = GridTitleH, valH = GridValH, rowH = GridRowH;
+            string label = isFrame ? DelphiManager.FrameMeta(frameChannel).label : DelphiManager.Meta(channel).label;
+
+            // Position is provisional — RelayoutGrid() packs the ACTIVE cells
+            // with no gaps and hides the rest immediately after this returns.
+            var cont = Empty(parent, $"Cell_{label}"); var crt = cont.GetComponent<RectTransform>();
+            crt.sizeDelta = new Vector2(_cellW, rowH);
+
+            var t = Txt(cont.transform, label.TrimEnd(' ', '(', ')'), 13, new Color(0.8f,0.85f,0.95f), new Vector2(0, 0), new Vector2(_cellW, titleH));
+            var v = Txt(cont.transform, "…", 12, _pending, new Vector2(0, -titleH), new Vector2(_cellW, valH)); v.alignment = TextAnchor.UpperRight;
+
+            var imgGO = new GameObject("Content", typeof(RawImage)); imgGO.transform.SetParent(cont.transform, false);
+            var raw = imgGO.GetComponent<RawImage>(); raw.color = Color.white;
+            var irt = imgGO.GetComponent<RectTransform>();
+            irt.anchorMin = irt.anchorMax = new Vector2(0, 1); irt.pivot = new Vector2(0, 1);
+            irt.anchoredPosition = new Vector2(0, -(titleH + valH)); irt.sizeDelta = new Vector2(_cellW, _cellH);
+
+            var panel = new Panel { isFrame = isFrame, cell = cont, cellRt = crt, title = t, value = v, image = raw };
+            if (isFrame)
+            {
+                panel.frameChannel = frameChannel;
+                var ph = new Texture2D(2, 2); ph.SetPixels(new[] { (Color)_panelBg, (Color)_panelBg, (Color)_panelBg, (Color)_panelBg }); ph.Apply(); raw.texture = ph;
+            }
+            else
+            {
+                panel.channel = channel;
+                panel.tex = new Texture2D(_cellW, _cellH, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+                panel.buffer = new Color32[_cellW * _cellH]; panel.history = new float[_cellW];
+                for (int x = 0; x < _cellW; x++) panel.history[x] = float.NaN;
+                raw.texture = panel.tex; Apply(panel);
+            }
+            return panel;
         }
 
         private void BuildTransport(Transform root)
@@ -775,10 +857,20 @@ namespace Delphi
             return img;
         }
 
+        // Every card's title gets its OWN small header box, visually
+        // separate from the card's content — not just text floating on the
+        // card background.
+        private const float CardHeaderH = 30f;
+
         private Transform Card(Transform parent, string title, Vector2 pos, Vector2 size)
         {
             var img = NewImage(parent, _card); var rt = img.rectTransform; rt.anchoredPosition = pos; rt.sizeDelta = size;
-            var t = Txt(img.transform, title, 14, _accent, new Vector2(14, -8), new Vector2(size.x - 28, 20)); t.fontStyle = FontStyle.Bold;
+
+            var header = NewImage(img.transform, _card2);
+            var hrt = header.rectTransform; hrt.sizeDelta = new Vector2(size.x, CardHeaderH);
+
+            var t = Txt(header.transform, title, 14, _accent, new Vector2(14, -8), new Vector2(size.x - 28, 20));
+            t.fontStyle = FontStyle.Bold;
             return img.transform;
         }
 

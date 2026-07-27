@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
 
@@ -116,14 +117,22 @@ namespace Delphi
         [SerializeField] private ScalarSensor accZ;
 
         [Header("Debug")]
-        [Tooltip("DEBUG — bypass all real sensors: feed the constant below as " +
-                 "EVERY metric's reading, so a full session / BO loop runs with " +
-                 "no hardware. Turning this ON forces every channel's ON/OFF " +
-                 "toggle OFF (their prior states are remembered and restored " +
-                 "when you turn it back OFF). Drive it from the checkbox at the " +
-                 "top of the Inspector so the save/restore fires.")]
+        [Tooltip("DEBUG — bypass all real sensors: feed EVERY metric a " +
+                 "sine+noise signal centred on the value below, each channel " +
+                 "on its own frequency, so a full session / BO loop runs with " +
+                 "no hardware. NOT a flat constant, on purpose — a real GP fit " +
+                 "needs actual variance to model; feeding it an identical " +
+                 "number on every channel is degenerate data that can make " +
+                 "BoTorch's model fit stall/retry internally, which looks " +
+                 "exactly like a hung optimizer. Turning this ON forces every " +
+                 "channel's ON/OFF toggle OFF (their prior states are " +
+                 "remembered and restored when you turn it back OFF). Drive " +
+                 "it from the checkbox at the top of the Inspector so the " +
+                 "save/restore fires.")]
         [SerializeField] private bool debugConstantFeed = false;
-        [Tooltip("Constant fed to every metric while Debug Constant Feed is on.")]
+        [Tooltip("Centre value each metric's debug signal wobbles around " +
+                 "while Debug Constant Feed is on (not the literal value fed — " +
+                 "see the toggle's tooltip).")]
         [SerializeField] private float debugValue = 3f;
         // Snapshot of the per-channel ON toggles taken when debug was enabled,
         // restored when it's disabled. Hidden — managed via SetDebugConstantFeed.
@@ -208,7 +217,11 @@ namespace Delphi
 
         public float GetValue(Channel ch)
         {
-            if (debugConstantFeed) return debugValue;
+            // Read the SAME per-channel varying debug sensor the acquisition
+            // pipeline samples from (see Slot/EnsureDebugSensors) — not a flat
+            // scalar — so the dashboard shows real variation instead of an
+            // identical number on every tile.
+            if (debugConstantFeed) return _debugSensors.TryGetValue(ch, out var ds) ? ds.Current : debugValue;
             if (IsInPlayback) return Playback.GetValue(ch);
             if (!IsOn(ch)) return float.NaN;
             var s = Slot(ch);
@@ -287,7 +300,7 @@ namespace Delphi
 
         private void OnEnable()
         {
-            if (debugConstantFeed) EnsureDebugSensor();
+            if (debugConstantFeed) EnsureDebugSensors();
             _coreGroups = new[]
             {
                 new DelphiCore.Group { channels = ContactChannels, rateHz = contactRateHz },
@@ -330,8 +343,10 @@ namespace Delphi
                 _coreGroups[2].rateHz = imuRateHz;
             }
 
-            // Keep the debug source's constant in sync with live edits.
-            if (debugConstantFeed && _debugSensor != null) _debugSensor.value = debugValue;
+            // Keep every debug sensor's centre in sync with live edits to the
+            // slider — their frequency/amplitude/noise stay whatever
+            // EnsureDebugSensors set, only the offset moves.
+            if (debugConstantFeed) SyncDebugSensorOffsets();
         }
 
         // ── Debug constant feed ─────────────────────────────────────────
@@ -340,20 +355,49 @@ namespace Delphi
         public bool DebugConstantFeed => debugConstantFeed;
         public float DebugValue => debugValue;
 
-        // A single hidden ConstantSensor, spawned in Play mode, that every
-        // channel's slot resolves to while debug is on — so DelphiCore samples
-        // the constant into the accumulator (baseline + windows) exactly like a
-        // real sensor, and recordings/objectives all see it.
-        private ConstantSensor _debugSensor;
+        // One hidden MockSensor_Scalar PER CHANNEL, spawned in Play mode,
+        // each on its own frequency so channels don't move in lockstep.
+        //
+        // A single shared ConstantSensor used to sit here instead — literally
+        // one identical, unchanging number fed to every channel. That's
+        // degenerate data: every baseline-vs-window deviation comes out to
+        // exactly 0 forever, which starves BoTorch's GP fit of any real
+        // variance to model. In practice that's what was behind a very slow,
+        // seemingly-hung optimizer step (GPyTorch's fit retries internally on
+        // certain numerical failures, and constant targets are a good way to
+        // trigger them) — swapping to genuinely varying mock sensors made it
+        // fit normally. This exists so flipping Debug Constant Feed on gets
+        // that same good behaviour by default, without hand-wiring
+        // MockSensor_Scalar into every slot first.
+        private readonly Dictionary<Channel, MockSensor_Scalar> _debugSensors = new();
 
-        private void EnsureDebugSensor()
+        private void EnsureDebugSensors()
         {
             if (!Application.isPlaying) return;
-            if (_debugSensor != null) { _debugSensor.value = debugValue; return; }
-            var go = new GameObject("[DebugConstantSensor]") { hideFlags = HideFlags.HideAndDontSave };
+            if (_debugSensors.Count > 0) { SyncDebugSensorOffsets(); return; }
+
+            var go = new GameObject("[DebugVaryingSensors]") { hideFlags = HideFlags.HideAndDontSave };
             go.transform.SetParent(transform, false);
-            _debugSensor = go.AddComponent<ConstantSensor>();
-            _debugSensor.value = debugValue;
+
+            for (int i = 0; i < AllChannels.Length; i++)
+            {
+                var s = go.AddComponent<MockSensor_Scalar>();
+                s.offset = debugValue;
+                // Spread frequencies out so no two channels are anywhere near
+                // in phase with each other — the actual decorrelation lever;
+                // the noise term alone wouldn't reliably prevent channels
+                // from tracking together.
+                s.frequency = 0.03f + 0.011f * i;
+                s.amplitude = Mathf.Max(0.5f, Mathf.Abs(debugValue) * 0.15f);
+                s.noise = s.amplitude * 0.3f;
+                _debugSensors[AllChannels[i]] = s;
+            }
+        }
+
+        private void SyncDebugSensorOffsets()
+        {
+            foreach (var s in _debugSensors.Values)
+                if (s != null) s.offset = debugValue;
         }
 
         /// <summary>Turn the debug constant feed on/off. Enabling snapshots then
@@ -363,14 +407,14 @@ namespace Delphi
         {
             if (on == debugConstantFeed)
             {
-                if (_debugSensor != null) _debugSensor.value = debugValue;
+                SyncDebugSensorOffsets();
                 return;
             }
             if (on)
             {
                 SnapshotAndClearToggles();
                 debugConstantFeed = true;
-                EnsureDebugSensor();
+                EnsureDebugSensors();
             }
             else
             {
@@ -432,10 +476,12 @@ namespace Delphi
             _                          => 30f
         });
 
-        // Map a channel to its slot. In debug, every channel resolves to the
-        // one constant sensor (so DelphiCore samples the constant everywhere).
+        // Map a channel to its slot. In debug, every channel resolves to ITS
+        // OWN varying mock sensor (not a shared one — see EnsureDebugSensors)
+        // so DelphiCore samples independently-moving, non-degenerate data
+        // into the accumulator exactly like real sensors would.
         private ScalarSensor Slot(Channel ch) =>
-            debugConstantFeed && _debugSensor != null ? _debugSensor : SlotRaw(ch);
+            debugConstantFeed && _debugSensors.TryGetValue(ch, out var s) ? s : SlotRaw(ch);
 
         private ScalarSensor SlotRaw(Channel ch) => ch switch
         {

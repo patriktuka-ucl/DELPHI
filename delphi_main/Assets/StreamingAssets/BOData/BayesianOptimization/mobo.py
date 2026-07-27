@@ -20,9 +20,14 @@ from gpytorch.mlls import ExactMarginalLogLikelihood
 N_INITIAL = 5
 N_ITERATIONS = 10
 BATCH_SIZE = 1
-NUM_RESTARTS = 10
-RAW_SAMPLES = 1024
-MC_SAMPLES = 512
+# Fallbacks only — Unity's SendInit always sends these explicitly (see
+# SessionController.numRestarts/rawSamples/mcSamples). Kept small here too:
+# this is a live session with a participant waiting, not an offline benchmark
+# run, and the model-guided iterations are the only ones these numbers slow
+# down (Sobol sampling iterations don't fit a model at all).
+NUM_RESTARTS = 3
+RAW_SAMPLES = 128
+MC_SAMPLES = 64
 SEED = 3
 
 PROBLEM_DIM = None
@@ -643,11 +648,19 @@ def mobo_execute(conn, seed, iterations, initial_samples):
     send_json_line(conn, {"type": "coverage", "value": float(volume)})
 
     for it in range(1, iterations + 1):
+        # This step (fit + acquisition optimization) is the only silent,
+        # expensive one in the whole exchange — everything else prints as it
+        # happens. Without this line, a participant-in-the-car wait of 10-60s
+        # looks identical in the console to a genuine hang.
+        print(f"---- Optimization iteration {it}/{iterations}: fitting model "
+              f"(numRestarts={NUM_RESTARTS}, rawSamples={RAW_SAMPLES}, mcSamples={MC_SAMPLES})...",
+              flush=True)
         t0 = time.time()
         fit_gpytorch_mll(mll)
         sampler = SobolQMCNormalSampler(sample_shape=torch.Size([MC_SAMPLES]), seed=SEED)
         new_x = optimize_qnehvi(model, sampler)
         t_elapsed = time.time() - t0
+        print(f"---- Optimization iteration {it}/{iterations}: done in {t_elapsed:.1f}s", flush=True)
         write_data_to_csv(exec_csv, ['Optimization', 'Execution_Time'],
                           [{'Optimization': it, 'Execution_Time': t_elapsed}])
 

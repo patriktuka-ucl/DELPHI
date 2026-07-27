@@ -18,8 +18,16 @@ namespace Delphi.Trial
         public string endReason;       // "Finished", "Aborted by user", "Error: ...", etc.
         public float totalDurationSeconds;
 
-        public float baselineSeconds;
-        public float baselineAveragingSeconds;
+        /// <summary>The baseline is measured DURING the meditation track, not
+        /// in a phase of its own: a window this long, ending
+        /// baselineWindowEndOffsetSeconds before the track finishes.</summary>
+        public float baselineWindowSeconds;
+        public float baselineWindowEndOffsetSeconds;
+        /// <summary>How many channels actually delivered samples in that
+        /// window. Fewer than the sensors attached means one dropped out —
+        /// check before trusting the objectives.</summary>
+        public int baselineChannelCount;
+
         public float windowSeconds;
         public float washoutSeconds;
         public float measureSeconds;

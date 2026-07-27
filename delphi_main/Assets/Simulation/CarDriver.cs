@@ -182,9 +182,19 @@ namespace Delphi.Simulation
 
         /// <summary>Experiment procedure: let the car start/resume driving —
         /// used both for the very first drive and for leaving a Park stop.
-        /// No-op if it's already driving.</summary>
+        /// No-op if it's already driving.
+        ///
+        /// Also clears _finished. Without that, a car that ever ran off the
+        /// physical end of the track once (see the "reached the END of the
+        /// track" branch in Update()) stays permanently inert for the REST OF
+        /// THE SESSION: _finished makes Update() a no-op every frame from
+        /// then on, and nothing but this method and OnTrackReady() ever
+        /// clears it. A short/looping-unaware track WILL hit that during a
+        /// real multi-condition session — resuming driving has to actually
+        /// mean the car can drive again.</summary>
         public void ResumeDriving()
         {
+            _finished = false;
             if (!_isParked) return;
             _isParked = false;
             _headingToPark = false;
@@ -196,9 +206,16 @@ namespace Delphi.Simulation
         /// any red light in between) until it reaches that exact line, then
         /// holds there until ResumeDriving() is called. No-op if already
         /// parked/heading there, and warns once if the track has no Park
-        /// marker (nothing to head to).</summary>
+        /// marker (nothing to head to).
+        ///
+        /// Also clears _finished — see ResumeDriving's doc. Without this, a
+        /// RequestPark() called after the car ran off the end of the track
+        /// sets _headingToPark/_parkingInPlace but Update() never processes
+        /// either (it no-ops at the top on _finished), so the car sits
+        /// forever in "heading to park" with nothing actually happening.</summary>
         public void RequestPark()
         {
+            _finished = false;
             if (_isParked || _headingToPark || _parkingInPlace) return;
             if (!track.TryGetParkAhead(S, out _targetPark))
             {
@@ -215,6 +232,29 @@ namespace Delphi.Simulation
             }
             _headingToPark = true;
             if (logStateChanges) Debug.Log($"[CarDriver] Heading to park at s={_targetPark.S:F0}m.");
+        }
+
+        /// <summary>Instantly teleport back to the track's start (its first
+        /// Park marker, or s=0 if none) and mark it parked there — no
+        /// physical drive, no elapsed time. This is what SessionController
+        /// calls at the end of every condition's drive: the evaluation
+        /// questionnaire covers the whole screen anyway, so resetting the car
+        /// in place while it's up is invisible to the participant, and
+        /// doesn't depend on the car ever physically reaching a marker
+        /// somewhere down the track — the track only needs to be long enough
+        /// for ONE drive, not the whole session's cumulative distance.</summary>
+        public void ResetToStart()
+        {
+            float startS = track.TryGetPark(out var startPark) ? startPark.S : 0f;
+            PlaceAt(startS, 0f);
+            _servedLights.Clear();
+            _finished = false;
+            _headingToPark = false;
+            _parkingInPlace = false;
+            _targetPark = null;
+            _isParked = true;
+            HoldStopped();
+            if (logStateChanges) Debug.Log($"[CarDriver] Reset to start (s={startS:F0}m).");
         }
 
         /// <summary>Immediate halt wherever the car currently is — no travel

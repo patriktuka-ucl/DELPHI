@@ -1,0 +1,6 @@
+UserID;ConditionID;GroupID;Timestamp;Iteration;Phase;IsPareto;InterBlinkInterval;Gaze;PupilDiameter;accelerationJerk;brakingJerk;followDistance;corneringSpeed;takeoverProbability;speedBelowLimit
+P0;implicit;1;2026-07-27 17:54:20;1;sampling;FALSE;0.001;0.022;0.013;0.068;0.225;0.699;0.063;0.375;0.03
+P0;implicit;1;2026-07-27 17:55:00;2;sampling;FALSE;0.001;0.01;0.006;0.147;0.339;0.27;0.273;0.69;0.389
+P0;implicit;1;2026-07-27 17:55:40;3;sampling;TRUE;-0.0;-0.008;-0.005;0.786;0.644;0.202;0.634;0.055;0.005
+P0;implicit;1;2026-07-27 17:56:22;4;optimization;FALSE;0.001;0.02;0.012;0.817;0.723;0.0;0.789;0.353;0.326
+P0;implicit;1;2026-07-27 17:57:03;5;optimization;FALSE;0.001;0.025;0.015;1.0;0.649;0.379;0.573;0.0;0.0
