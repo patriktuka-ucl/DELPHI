@@ -35,6 +35,13 @@ namespace Delphi
         [SerializeField] private int listenPort = 9500;
         [SerializeField] private string hrAddress = "/PolarH10/HR";
         [SerializeField] private string rrAddress = "/PolarH10/RR";
+        [Tooltip("Logs actual parse FAILURES only (malformed packet, unrecognized " +
+                 "address, missing float arg) — rare-path diagnostics. Deliberately " +
+                 "does NOT echo every successfully-parsed HR/RR value: at 25-200Hz " +
+                 "accelerometer rates that's 100+ Debug.Log calls/sec from this " +
+                 "background listener thread, which measurably tanks editor " +
+                 "framerate (proven: 267KB GC alloc in a single frame with this " +
+                 "flag misused for verbose echo). Leave off outside debugging.")]
         [SerializeField] private bool logParseErrors = false;
 
         [Header("HRV Settings")]
@@ -132,10 +139,18 @@ namespace Delphi
                 return;
             }
 
+            // The accelerometer's BLE stream rate is NOT configured here — it
+            // comes from DelphiManager.imuRateHz, keeping the project's rule
+            // that every rate in DELPHI lives on the manager. The strap only
+            // accepts 25/50/100/200Hz, so the bridge clamps whatever we ask for
+            // down to the nearest supported rate (e.g. 30 -> 25).
+            var mgr = FindFirstObjectByType<DelphiManager>();
+            int accRateHz = mgr != null ? Mathf.RoundToInt(mgr.imuRateHz) : 25;
+
             var startInfo = new ProcessStartInfo
             {
                 FileName = pythonExe,
-                Arguments = $"\"{scriptPath}\"",
+                Arguments = $"\"{scriptPath}\" --acc-rate {accRateHz}",
                 WorkingDirectory = projectRoot,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
@@ -151,7 +166,8 @@ namespace Delphi
                 _pythonProcess.Start();
                 _pythonProcess.BeginOutputReadLine();
                 _pythonProcess.BeginErrorReadLine();
-                Debug.Log($"[PolarH10OscConnection] Launched Python bridge (PID {_pythonProcess.Id}).");
+                Debug.Log($"[PolarH10OscConnection] Launched Python bridge (PID {_pythonProcess.Id}), " +
+                          $"ACC rate requested {accRateHz}Hz (from DelphiManager.imuRateHz).");
             }
             catch (Exception e)
             {
@@ -192,9 +208,6 @@ namespace Delphi
                 {
                     break; // socket closed during shutdown, or transient error
                 }
-
-                if (logParseErrors)
-                    Debug.Log($"[PolarH10OscConnection] Received {data.Length} bytes from {remoteEP}");
 
                 try
                 {
@@ -273,14 +286,10 @@ namespace Delphi
             if (address == hrAddress)
             {
                 lock (_lock) { _latestHrBpm = firstFloat; _hasHr = true; }
-                if (logParseErrors)
-                    Debug.Log($"[PolarH10OscConnection] HR {firstFloat} bpm");
             }
             else if (address == rrAddress)
             {
                 OnRrInterval(firstFloat);
-                if (logParseErrors)
-                    Debug.Log($"[PolarH10OscConnection] RR {firstFloat} ms");
             }
             else if (address == accXAddress)
             {

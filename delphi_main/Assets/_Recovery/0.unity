@@ -19033,13 +19033,13 @@ MonoBehaviour:
   webcamOn: 1
   webcam: {fileID: 1425785811}
   webcamFps: 30
-  sceneOverviewOn: 0
+  sceneOverviewOn: 1
   sceneOverview: {fileID: 1531519421}
   sceneOverviewFps: 30
-  playerViewOn: 0
+  playerViewOn: 1
   playerView: {fileID: 988303697}
   playerViewFps: 30
-  panorama360On: 0
+  panorama360On: 1
   panorama360: {fileID: 1425288970}
   panorama360Fps: 10
 --- !u!4 &1745511444

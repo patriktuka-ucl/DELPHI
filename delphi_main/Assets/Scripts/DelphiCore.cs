@@ -2,10 +2,25 @@ using System;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace Delphi
 {
+    // Windows normally times Sleep() to a ~15.6ms system tick, which would make
+    // the 1ms sleeps in DelphiCore's sampling loop actually take up to 15ms and
+    // wreck sampling accuracy at high rates (e.g. 200Hz IMU). Raising the timer
+    // resolution to 1ms (the same trick DAWs/game engines use) makes Sleep(1)
+    // genuinely ~1ms. See DelphiCore.Start/Stop for the matching begin/end calls
+    // — must be paired, and is process-wide for as long as it's held.
+    internal static class WindowsTimerResolution
+    {
+        [DllImport("winmm.dll", EntryPoint = "timeBeginPeriod")]
+        internal static extern uint TimeBeginPeriod(uint uMilliseconds);
+        [DllImport("winmm.dll", EntryPoint = "timeEndPeriod")]
+        internal static extern uint TimeEndPeriod(uint uMilliseconds);
+    }
+
     /// <summary>
     /// DELPHI's own clock — Stopwatch-backed, monotonic, high-resolution,
     /// and completely unrelated to Unity's frame loop, Time.* or timeScale.
@@ -144,6 +159,7 @@ namespace Delphi
             double now = DelphiClock.Now;
             foreach (var g in _groups) g.nextTick = now;
             _running = true;
+            try { WindowsTimerResolution.TimeBeginPeriod(1); } catch { } // no-op off Windows
             _thread = new Thread(SampleLoop)
             {
                 IsBackground = true,
@@ -158,6 +174,7 @@ namespace Delphi
             _running = false;
             try { _thread?.Join(500); } catch { }
             _thread = null;
+            try { WindowsTimerResolution.TimeEndPeriod(1); } catch { }
             StopCsv();
         }
 
@@ -225,12 +242,20 @@ namespace Delphi
                     }
                 }
 
-                // Sleep until the earliest upcoming tick. Thread.Sleep has
-                // ~1ms granularity, so sleep short and let the loop re-check
-                // rather than oversleeping past a tick.
+                // Sleep until the earliest upcoming tick. PREVIOUSLY this used
+                // Thread.Sleep(0) for the final <3ms — that's a BUSY-SPIN, not a
+                // real sleep (it only yields if another equal-priority thread is
+                // ready to run RIGHT NOW, else returns near-instantly). Since the
+                // loop wakes ~1.5ms early on purpose, it hit that branch on
+                // basically every tick, at every configured rate — measured via
+                // Windows perf counters to peg one full CPU core continuously,
+                // in BOTH the Editor and a standalone build, unrelated to any
+                // other DELPHI subsystem. Thread.Sleep(1) is a REAL OS sleep
+                // (relying on Start()'s 1ms timer-resolution boost to keep it
+                // close to 1ms instead of Windows' default ~15.6ms tick), so the
+                // thread actually goes idle instead of burning a core.
                 double wait = next - DelphiClock.Now;
-                if (wait > 0.003)      Thread.Sleep((int)((wait - 0.0015) * 1000));
-                else if (wait > 0)     Thread.Sleep(0); // yield, re-check immediately
+                if (wait > 0.0015) Thread.Sleep(1);
             }
         }
 
