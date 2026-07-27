@@ -365,6 +365,12 @@ namespace Delphi
         public float GetAccYmG() { lock (_lock) { return _hasAcc ? _latestAccYmG : float.NaN; } }
         public float GetAccZmG() { lock (_lock) { return _hasAcc ? _latestAccZmG : float.NaN; } }
 
+        /// <summary>True once the strap has actually delivered HR or ACC data
+        /// — the socket binding alone (Awake succeeding) only means we're
+        /// listening, not that anything is streaming (BLE connect/subscribe
+        /// on the Python side can take several seconds and retries).</summary>
+        public bool HasReceivedData { get { lock (_lock) { return _hasHr || _hasAcc; } } }
+
         private void OnDestroy()
         {
             _running = false;

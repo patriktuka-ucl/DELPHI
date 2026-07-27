@@ -7,6 +7,7 @@ using UnityEngine.UI;
 using UnityEngine.InputSystem;
 using Delphi.Session;
 using Delphi.Simulation;
+using Delphi.Motion;
 
 namespace Delphi
 {
@@ -54,6 +55,16 @@ namespace Delphi
         [Min(1f)] public float redrawFps = 10f;
         private float RedrawInterval => 1f / Mathf.Max(1f, redrawFps);
 
+        [Header("Overhead camera view — live, drag while in Play mode")]
+        public OverviewIndicators overviewIndicators;
+        [Tooltip("Diameter (m) of each event marker ball in the overhead " +
+                 "view. The car's own ball is drawn 1.4× this, same ratio " +
+                 "as today's look — so this alone keeps them proportional.")]
+        [Range(20f, 300f)] public float overheadBallSize = 100f;
+        [Tooltip("Width (m) of the route line in the overhead view.")]
+        [Range(1f, 40f)] public float overheadRouteWidth = 10f;
+        private float _lastOverheadBallSize = -1f, _lastOverheadRouteWidth = -1f;
+
         // ── Palette ─────────────────────────────────────────────────────
         private readonly Color _bg      = new Color(0.055f, 0.065f, 0.09f, 1f);
         private readonly Color _card    = new Color(0.10f, 0.12f, 0.17f, 1f);
@@ -86,6 +97,7 @@ namespace Delphi
             if (session == null)  session  = FindFirstObjectByType<SessionController>();
             if (recorder == null) recorder = FindFirstObjectByType<SessionRecorder>();
             if (player == null)   player   = FindFirstObjectByType<SessionPlayer>();
+            if (overviewIndicators == null) overviewIndicators = FindFirstObjectByType<OverviewIndicators>();
             if (manager == null) { Debug.LogError("[ExperimentUI] No DelphiManager."); enabled = false; return; }
 
             _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
@@ -106,7 +118,10 @@ namespace Delphi
             RefreshSessionCard();
             RefreshTrialCard();
             RefreshBaselineCard();
+            RefreshForcesGizmo();
+            RefreshConnectionsCard();
             RefreshTransport();
+            RefreshOverheadTuning();
             PollEvents();
 
             _redrawTimer += Time.deltaTime;
@@ -121,13 +136,53 @@ namespace Delphi
         private Image[] _orderImg = new Image[SessionController.OrderCount];
         private Text _orderPreviewTxt;
         private InputField _userIdField;
-        private Text _phaseTxt, _statusTxt, _headerStatus;
+        private Text _phaseTxt, _statusTxt;
         private Text[] _condLabel = new Text[3];
         private Text[] _condTime  = new Text[3];
         private Slider _condBar;
         private Button _qDoneBtn, _breakBtn, _continueBtn, _resumeBreakBtn,
                        _endFreePlayBtn, _nudgeBtn, _estopBtn, _estopResumeBtn;
         private Text _estopBanner;
+
+        /// <summary>Researcher-facing phase name — underscored words, not the
+        /// raw enum run together (e.g. not "WAITINGFORPARAMETERS"). Wording
+        /// agreed with the researcher directly, not just a mechanical spacing
+        /// of the C# name:
+        ///   - Washout → PARAMETER_TRANSITION (that's literally what it is:
+        ///     the ramp into the new parameter set settling, plus physiology
+        ///     catching up, before Measuring starts)
+        ///   - AwaitingRating → TRIAL_EVALUATION (the participant's rating of
+        ///     ONE iteration/trial's parameter set — happens up to `iterations`
+        ///     times per condition, feeds the optimizer directly)
+        ///   - Questionnaire → CONDITION_EVALUATION (the post-drive trust/
+        ///     predictability/safety/comfort form — happens ONCE per
+        ///     condition, purely recorded, never touches the optimizer)
+        ///   - FreePlay → FREE_ROAM (matches ConditionKind.FreeRoam, the name
+        ///     used everywhere else in this UI — FreePlay is only the
+        ///     internal C# name). No optimizer runs during it at all — the
+        ///     participant adjusts the sliders directly — so unlike Implicit/
+        ///     Explicit there's no PARAMETER_TRANSITION/MEASURING equivalent
+        ///     for it to go through; unlike them, deliberately.
+        /// Idle isn't here — RefreshSessionCard shows "IDLE" directly, since
+        /// CanStart covers both Phase.Idle and Phase.Complete.</summary>
+        private static string PhaseLabel(SessionController.Phase phase) => phase switch
+        {
+            SessionController.Phase.Intro                 => "INTRO",
+            SessionController.Phase.Meditation             => "MEDITATION",
+            SessionController.Phase.ConditionIntro         => "CONDITION_INTRO",
+            SessionController.Phase.WaitingForOptimizer    => "WAITING_FOR_OPTIMIZER",
+            SessionController.Phase.WaitingForParameters   => "WAITING_FOR_PARAMETERS",
+            SessionController.Phase.Washout                => "PARAMETER_TRANSITION",
+            SessionController.Phase.Measuring              => "MEASURING",
+            SessionController.Phase.AwaitingRating         => "TRIAL_EVALUATION",
+            SessionController.Phase.Questionnaire          => "CONDITION_EVALUATION",
+            SessionController.Phase.BreakOffer             => "BREAK_OFFER",
+            SessionController.Phase.FreePlay               => "FREE_ROAM",
+            SessionController.Phase.Complete               => "SESSION_COMPLETE",
+            SessionController.Phase.EmergencyStop          => "EMERGENCY_STOP",
+            SessionController.Phase.Error                  => "ERROR",
+            _                                               => phase.ToString().ToUpperInvariant(),
+        };
 
         private void RefreshSessionCard()
         {
@@ -139,9 +194,6 @@ namespace Delphi
 
             _preGroup.SetActive(idle);
             _liveGroup.SetActive(!idle);
-            _headerStatus.text = idle ? "ready" : $"{phase}".ToUpperInvariant();
-            _headerStatus.color = stopped ? _estop : idle ? _dim
-                                : phase == SessionController.Phase.Complete ? _accent : _running;
 
             if (idle)
             {
@@ -154,7 +206,7 @@ namespace Delphi
             }
             else
             {
-                _phaseTxt.text = phase.ToString().ToUpperInvariant();
+                _phaseTxt.text = PhaseLabel(phase);
                 _phaseTxt.color = stopped ? _estop
                                 : phase == SessionController.Phase.Complete ? _accent : _running;
                 double pr = session.PhaseSecondsRemaining;
@@ -225,7 +277,7 @@ namespace Delphi
         //  on their own world-space panel, see FreePlayPanel.cs)
         // ════════════════════════════════════════════════════════════════
         private Image _optDot;
-        private Text _optLabel, _iterTxt, _hvTxt;
+        private Text _optLabel, _iterTxt, _hvTxt, _trackPosTxt;
         private static readonly string[] ParamLabels =
             { "Accel jerk", "Brake jerk", "Follow dist", "Corner spd", "Takeover", "Speed<lim" };
         private Slider[] _paramBars = new Slider[6];
@@ -248,6 +300,14 @@ namespace Delphi
             _hvTxt.text = float.IsNaN(session.LastCoverage) ? "hypervolume  —" : $"hypervolume  {session.LastCoverage:F3}";
             _hvTxt.color = float.IsNaN(session.LastCoverage) ? _dim : _accent;
 
+            if (session.carDriver != null && session.carDriver.track != null)
+            {
+                float s = session.carDriver.S;
+                float total = Mathf.Max(1f, session.carDriver.track.TotalLength);
+                _trackPosTxt.text = $"Track: {s:F0}m / {total:F0}m ({100f * s / total:F0}%)";
+            }
+            else _trackPosTxt.text = "Track: —";
+
             if (session.carDriver != null)
             {
                 var p = session.carDriver.parameters;
@@ -259,6 +319,29 @@ namespace Delphi
                     _paramVals[i].text = v[i].ToString("F2");
                 }
             }
+        }
+
+        /// <summary>Pushes the two Inspector sliders above into
+        /// OverviewIndicators — only when a value actually changed, since
+        /// applying it rebuilds every marker on the overhead view (see
+        /// OverviewIndicators.ApplyTuning). Drag either slider in Play mode
+        /// and the overhead feed updates within a frame.</summary>
+        private void RefreshOverheadTuning()
+        {
+            // Self-healing rather than a one-shot Start()-time find: this
+            // component can end up enabled/queried before OverviewIndicators
+            // is ready depending on scene load order, and a null reference
+            // here would otherwise silently disable the sliders for the rest
+            // of the session.
+            if (overviewIndicators == null) overviewIndicators = FindFirstObjectByType<OverviewIndicators>();
+            if (overviewIndicators == null) return;
+            if (Mathf.Approximately(overheadBallSize, _lastOverheadBallSize) &&
+                Mathf.Approximately(overheadRouteWidth, _lastOverheadRouteWidth))
+                return;
+
+            _lastOverheadBallSize = overheadBallSize;
+            _lastOverheadRouteWidth = overheadRouteWidth;
+            overviewIndicators.ApplyTuning(overheadBallSize * 1.4f, overheadBallSize, overheadRouteWidth);
         }
 
         // ════════════════════════════════════════════════════════════════
@@ -604,20 +687,20 @@ namespace Delphi
             // Header
             var title = Txt(_root, "DELPHI — Experiment Control", 24, _text, new Vector2(24, -16), new Vector2(700, 32));
             title.fontStyle = FontStyle.Bold;
-            _headerStatus = Txt(_root, "ready", 18, _dim, new Vector2(730, -18), new Vector2(400, 28));
-            _headerStatus.fontStyle = FontStyle.Bold;
 
             BuildSessionCard(_root);
             BuildTrialCard(_root);
             BuildBaselineCard(_root);
-            BuildEventLog(_root);
             BuildSensorGrid(_root);
+            BuildForcesGizmo(_root);
+            BuildConnectionsCard(_root);
+            BuildEventLog(_root);
             BuildTransport(_root);
         }
 
         private void BuildSessionCard(Transform root)
         {
-            var card = Card(root, "Session", new Vector2(24, -60), new Vector2(452, 300));
+            var card = Card(root, "Session", new Vector2(24, SessionCardY), new Vector2(452, SessionCardH));
             var host = card.transform;
 
             _preGroup = Empty(host, "pre");
@@ -679,24 +762,38 @@ namespace Delphi
             _estopBanner = Txt(host, "STOPPED — platform returning, passthrough on", 12, _estop, new Vector2(16, -290), new Vector2(422, 18));
         }
 
+        // Left-column layout, each derived from the one above it so a height
+        // change here can't silently leave the next card overlapping —
+        // that already happened once by hand-matching two magic numbers.
+        private const float SessionCardY = -60, SessionCardH = 300;
+        private const float TrialCardY = SessionCardY - SessionCardH - 12, TrialCardH = 258;
+        private const float BaselineCardY = TrialCardY - TrialCardH - 8, BaselineCardH = 152;
+
+        // Right-column layout (beside the Sensor Grid, GridX0) — Forces
+        // gizmo, then Connections, then Event Log, top edge matching the
+        // Sensor Grid's own (GridY0). Each Y computed where used, same
+        // derive-from-the-one-above pattern as the left column.
+        private const float GizmoCardH = 220, ConnectionsCardH = 240;
+
         private void BuildTrialCard(Transform root)
         {
-            var card = Card(root, "Trial Progress — driven by the session automatically", new Vector2(24, -372), new Vector2(452, 236));
+            var card = Card(root, "Trial Progress — driven by the session automatically",
+                new Vector2(24, TrialCardY), new Vector2(452, TrialCardH));
             var host = card.transform;
             _optDot = Dot(host, new Vector2(16, -32)); _optLabel = Txt(host, "optimizer: idle", 13, _pending, new Vector2(34, -30), new Vector2(404, 20));
             _iterTxt = Txt(host, "iteration — / —", 14, _dim, new Vector2(16, -54), new Vector2(240, 22));
             _hvTxt = Txt(host, "hypervolume  —", 14, _dim, new Vector2(210, -54), new Vector2(228, 22)); _hvTxt.alignment = TextAnchor.UpperRight;
+
+            _trackPosTxt = Txt(host, "Track: —", 13, _accent, new Vector2(16, -76), new Vector2(422, 20));
+
             for (int i = 0; i < 6; i++)
             {
-                float y = -84 - i * 24;
+                float y = -106 - i * 24;
                 Txt(host, ParamLabels[i], 12, _dim, new Vector2(16, y), new Vector2(96, 20));
                 _paramBars[i] = Bar(host, new Vector2(116, y - 2), new Vector2(280, 14), _running);
                 _paramVals[i] = Txt(host, "0.50", 12, _dim, new Vector2(402, y), new Vector2(40, 20));
             }
         }
-
-        // Sits right below the Trial card (which ends at y=-372-236=-608).
-        private const float BaselineCardY = -616, BaselineCardH = 152;
 
         private void BuildBaselineCard(Transform root)
         {
@@ -731,12 +828,298 @@ namespace Delphi
         }
 
         // EVENT LOG sits below BASELINE now, not directly below TRIAL.
+        // Event Log lives to the right of the Sensor Grid — same top edge
+        // (GridY0), sized with the exact same box-width formula
+        // BuildSensorGrid uses for its own boxes (that formula is fixed —
+        // channel count only changes box HEIGHT there, not width).
+        private float RightColumnX => GridX0 + (GridCols * (_cellW + GridColGap) - GridColGap + 32f) + 24f;
+
         private void BuildEventLog(Transform root)
         {
-            float y = BaselineCardY - BaselineCardH - 8;
-            var card = Card(root, "Event Log", new Vector2(24, y), new Vector2(452, 300));
+            float y = GridY0 - GizmoCardH - 12 - ConnectionsCardH - 12;
+            var card = Card(root, "Event Log", new Vector2(RightColumnX, y), new Vector2(452, 300));
             _logText = Txt(card.transform, "", 12, _dim, new Vector2(16, -32), new Vector2(422, 258));
             _logText.alignment = TextAnchor.UpperLeft;
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        //  FORCES GIZMO — live readout of the seat's actual commanded
+        //  pitch/roll/yaw. Colors match Unity's own transform-gizmo
+        //  convention (X=pitch=red, Y=yaw=green, Z=roll=blue).
+        //
+        //  Pitch/roll are a crosshair (vertical=pitch, horizontal=roll) —
+        //  each a straight vector, since they're bounded ±max and only ever
+        //  mean "how far, which direction along one axis." Yaw gets its own
+        //  compass dial with a rotating needle instead of a vector line —
+        //  it's a full 0-360° heading, not a bounded magnitude, so a line
+        //  that only flips 180° can't represent it properly.
+        // ════════════════════════════════════════════════════════════════
+        private const float GizmoMaxLen = 56f;
+        private Vector2 _crosshairOrigin, _compassOrigin;
+        private Image _gizmoPitchLine, _gizmoRollLine, _compassNeedle;
+        private Text _gizmoValuesTxt;
+
+        private void BuildForcesGizmo(Transform root)
+        {
+            var card = Card(root, "Forces (commanded)", new Vector2(RightColumnX, GridY0), new Vector2(452, GizmoCardH));
+            var host = card.transform;
+
+            float centerY = -(GizmoCardH - CardHeaderH) / 2f - 6f;
+            _crosshairOrigin = new Vector2(120, centerY);
+            _compassOrigin = new Vector2(330, centerY);
+
+            var pitchColor = new Color(0.95f, 0.3f, 0.3f);
+            var rollColor = new Color(0.35f, 0.55f, 0.95f);
+            var yawColor = new Color(0.35f, 0.85f, 0.4f);
+            var refColor = new Color(1f, 1f, 1f, 0.15f);
+
+            // Crosshair reference lines (full range, dim) + live vectors.
+            SetVectorLine(MakeVectorLine(host, refColor), _crosshairOrigin, 90f, GizmoMaxLen, 2f);
+            SetVectorLine(MakeVectorLine(host, refColor), _crosshairOrigin, 0f, GizmoMaxLen, 2f);
+            _gizmoPitchLine = MakeVectorLine(host, pitchColor);
+            _gizmoRollLine = MakeVectorLine(host, rollColor);
+
+            var crosshairDot = NewImage(host, _text);
+            var cdrt = crosshairDot.rectTransform;
+            cdrt.pivot = new Vector2(0.5f, 0.5f);
+            cdrt.anchoredPosition = _crosshairOrigin;
+            cdrt.sizeDelta = new Vector2(8, 8);
+
+            var pitchLabel = Txt(host, "PITCH", 11, pitchColor, _crosshairOrigin + new Vector2(-30, GizmoMaxLen + 10), new Vector2(70, 16));
+            pitchLabel.fontStyle = FontStyle.Bold;
+            var rollLabel = Txt(host, "ROLL", 11, rollColor, _crosshairOrigin + new Vector2(GizmoMaxLen + 6, -8), new Vector2(70, 16));
+            rollLabel.fontStyle = FontStyle.Bold;
+
+            // Compass ring (procedural texture, no asset dependency) + needle.
+            var ring = new GameObject("YawRing", typeof(Image));
+            ring.transform.SetParent(host, false);
+            var ringImg = ring.GetComponent<Image>();
+            ringImg.sprite = GetYawRingSprite();
+            ringImg.color = new Color(yawColor.r, yawColor.g, yawColor.b, 0.5f);
+            ringImg.raycastTarget = false;
+            var ringRt = ringImg.rectTransform;
+            ringRt.pivot = new Vector2(0.5f, 0.5f);
+            ringRt.anchoredPosition = _compassOrigin;
+            ringRt.sizeDelta = new Vector2((GizmoMaxLen + 6f) * 2f, (GizmoMaxLen + 6f) * 2f);
+
+            _compassNeedle = MakeVectorLine(host, yawColor);
+
+            var compassDot = NewImage(host, _text);
+            var codrt = compassDot.rectTransform;
+            codrt.pivot = new Vector2(0.5f, 0.5f);
+            codrt.anchoredPosition = _compassOrigin;
+            codrt.sizeDelta = new Vector2(8, 8);
+
+            var yawLabel = Txt(host, "YAW", 11, yawColor, _compassOrigin + new Vector2(-20, GizmoMaxLen + 16), new Vector2(70, 16));
+            yawLabel.fontStyle = FontStyle.Bold;
+
+            _gizmoValuesTxt = Txt(host, "", 12, _dim, new Vector2(16, -(GizmoCardH - CardHeaderH - 14)), new Vector2(420, 20));
+        }
+
+        private void RefreshForcesGizmo()
+        {
+            var yaw = YawVR3Connection.Instance;
+            var cues = yaw != null && yaw.cues != null ? yaw.cues : FindFirstObjectByType<CarMotionCues>();
+
+            if (cues == null)
+            {
+                _gizmoValuesTxt.text = "No CarMotionCues found";
+                SetVectorLine(_gizmoPitchLine, _crosshairOrigin, 90f, 0f, 5f);
+                SetVectorLine(_gizmoRollLine, _crosshairOrigin, 0f, 0f, 5f);
+                SetVectorLine(_compassNeedle, _compassOrigin, 90f, 0f, 4f);
+                return;
+            }
+
+            float pitchLen = Mathf.Clamp01(Mathf.Abs(cues.PitchDeg) / Mathf.Max(1f, cues.maxPitchDeg)) * GizmoMaxLen;
+            float rollLen = Mathf.Clamp01(Mathf.Abs(cues.RollDeg) / Mathf.Max(1f, cues.maxRollDeg)) * GizmoMaxLen;
+            SetVectorLine(_gizmoPitchLine, _crosshairOrigin, cues.PitchDeg >= 0f ? 90f : 270f, pitchLen, 5f);
+            SetVectorLine(_gizmoRollLine, _crosshairOrigin, cues.RollDeg >= 0f ? 0f : 180f, rollLen, 5f);
+
+            // Compass convention: 0° = up, increasing clockwise — standard
+            // math angle (0°=right, CCW+) needs converting for that.
+            float headingDeg = Mathf.Repeat(cues.YawDeg, 360f);
+            float needleMathAngle = 90f - headingDeg;
+            SetVectorLine(_compassNeedle, _compassOrigin, needleMathAngle, GizmoMaxLen, 4f);
+
+            _gizmoValuesTxt.text = $"pitch {cues.PitchDeg:0.#}°   roll {cues.RollDeg:0.#}°   yaw {headingDeg:0.#}°";
+        }
+
+        private Image MakeVectorLine(Transform parent, Color color)
+        {
+            var go = new GameObject("Vector", typeof(Image));
+            go.transform.SetParent(parent, false);
+            var img = go.GetComponent<Image>();
+            img.color = color;
+            img.raycastTarget = false;
+            var rt = img.rectTransform;
+            rt.anchorMin = rt.anchorMax = new Vector2(0f, 1f);
+            rt.pivot = new Vector2(0f, 0.5f); // rotates around its START point
+            return img;
+        }
+
+        private static void SetVectorLine(Image img, Vector2 origin, float angleDeg, float length, float thickness)
+        {
+            var rt = img.rectTransform;
+            rt.anchoredPosition = origin;
+            rt.sizeDelta = new Vector2(Mathf.Max(0.01f, length), thickness);
+            rt.localRotation = Quaternion.Euler(0f, 0f, angleDeg);
+        }
+
+        // Procedural ring texture for the yaw compass — no imported sprite
+        // asset needed. Generated once, cached.
+        private static Sprite _yawRingSprite;
+
+        private static Sprite GetYawRingSprite()
+        {
+            if (_yawRingSprite != null) return _yawRingSprite;
+            const int size = 128;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false) { filterMode = FilterMode.Bilinear };
+            var pixels = new Color32[size * size];
+            float center = size / 2f;
+            float outerR = size / 2f - 3f;
+            float innerR = outerR - 4f;
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = x + 0.5f - center, dy = y + 0.5f - center;
+                    float dist = Mathf.Sqrt(dx * dx + dy * dy);
+                    byte a = (dist <= outerR && dist >= innerR) ? (byte)255 : (byte)0;
+                    pixels[y * size + x] = new Color32(255, 255, 255, a);
+                }
+            }
+            tex.SetPixels32(pixels);
+            tex.Apply();
+            _yawRingSprite = Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f));
+            return _yawRingSprite;
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        //  CONNECTIONS — every external I/O link at a glance: the YAW VR3
+        //  rig, the BO optimizer process, and the sensor bridges. All of
+        //  these connect automatically on Play; the YAW rig's motion going
+        //  LIVE never does (see conversation) — that's the one explicit
+        //  action in this card. The cues readout under YAW VR3 exists so
+        //  you can see at a glance whether CarMotionCues is even computing
+        //  nonzero tilt (car actually driving) versus the rig just sitting
+        //  Connected-not-Started.
+        // ════════════════════════════════════════════════════════════════
+        private Image _connYawDot, _connBoDot, _connGsrDot, _connPolarDot;
+        private Text _connYawTxt, _connYawCuesTxt, _connBoTxt, _connGsrTxt, _connPolarTxt;
+        private Text _yawMotionTxt, _yawRumbleTxt;
+        private Image _yawMotionImg, _yawRumbleImg;
+
+        private void BuildConnectionsCard(Transform root)
+        {
+            float y = GridY0 - GizmoCardH - 12;
+            var card = Card(root, "Connections", new Vector2(RightColumnX, y), new Vector2(452, ConnectionsCardH));
+            var host = card.transform;
+
+            _connYawDot = Dot(host, new Vector2(16, -34));
+            _connYawTxt = Txt(host, "YAW VR3: —", 13, _dim, new Vector2(34, -30), new Vector2(404, 20));
+            _connYawCuesTxt = Txt(host, "", 11, _dim, new Vector2(34, -50), new Vector2(404, 16));
+
+            _connBoDot = Dot(host, new Vector2(16, -78));
+            _connBoTxt = Txt(host, "BO Hub: —", 13, _dim, new Vector2(34, -74), new Vector2(404, 20));
+
+            _connGsrDot = Dot(host, new Vector2(16, -102));
+            _connGsrTxt = Txt(host, "GSR: —", 13, _dim, new Vector2(34, -98), new Vector2(404, 20));
+
+            _connPolarDot = Dot(host, new Vector2(16, -126));
+            _connPolarTxt = Txt(host, "Polar H10: —", 13, _dim, new Vector2(34, -122), new Vector2(404, 20));
+
+            _yawMotionImg = Btn(host, "START MOTION", new Vector2(16, -156), new Vector2(422, 32),
+                ToggleYawMotion, out _yawMotionTxt);
+            _yawRumbleImg = Btn(host, "RUMBLE: ON", new Vector2(16, -196), new Vector2(422, 24),
+                ToggleYawRumble, out _yawRumbleTxt);
+        }
+
+        private void ToggleYawMotion()
+        {
+            var yaw = YawVR3Connection.Instance;
+            if (yaw == null) return;
+            if (yaw.State == YawConnectionState.Connected) yaw.StartMotion();
+            else if (yaw.State == YawConnectionState.Started) yaw.StopMotion();
+        }
+
+        private void ToggleYawRumble()
+        {
+            var yaw = YawVR3Connection.Instance;
+            if (yaw != null) yaw.rumbleEnabled = !yaw.rumbleEnabled;
+        }
+
+        private void RefreshConnectionsCard()
+        {
+            // YAW VR3
+            var yaw = YawVR3Connection.Instance;
+            var motionBtn = _yawMotionImg.GetComponent<Button>();
+            if (yaw == null)
+            {
+                _connYawTxt.text = "YAW VR3: not present in scene";
+                _connYawTxt.color = _connYawDot.color = _dim;
+                _connYawCuesTxt.text = "";
+                motionBtn.interactable = false;
+            }
+            else
+            {
+                _connYawTxt.text = $"YAW VR3: {yaw.State} — {yaw.StatusText}";
+                Color yawColor = yaw.State switch
+                {
+                    YawConnectionState.Started => _running,
+                    YawConnectionState.Connected => _accent,
+                    YawConnectionState.Discovering or YawConnectionState.Connecting
+                        or YawConnectionState.Starting or YawConnectionState.Stopping => _pending,
+                    _ => _dim
+                };
+                _connYawTxt.color = _connYawDot.color = yawColor;
+
+                var cues = yaw.cues;
+                _connYawCuesTxt.text = cues != null
+                    ? $"cues — pitch {cues.PitchDeg:0.#}°  roll {cues.RollDeg:0.#}°  " +
+                      $"(surge {cues.SurgeG:0.00}g  lateral {cues.LateralG:0.00}g)"
+                    : "cues — no CarMotionCues found";
+
+                bool canStart = yaw.State == YawConnectionState.Connected;
+                bool canStop = yaw.State == YawConnectionState.Started;
+                motionBtn.interactable = canStart || canStop;
+                _yawMotionTxt.text = canStop ? "STOP MOTION" : "START MOTION";
+                _yawMotionImg.color = canStop ? _estop : (canStart ? _btnSel : _btn);
+
+                _yawRumbleTxt.text = yaw.rumbleEnabled ? "RUMBLE: ON" : "RUMBLE: OFF";
+                _yawRumbleImg.color = yaw.rumbleEnabled ? _btnSel : _btn;
+            }
+
+            // BO Hub — reuse SessionController's own optimizer status
+            if (session != null)
+            {
+                var (c, l) = session.Optimizer switch
+                {
+                    SessionController.OptimizerStatus.Connected    => (_accent, "BO Hub: connected"),
+                    SessionController.OptimizerStatus.Starting     => (new Color(0.85f, 0.75f, 0.25f), "BO Hub: starting…"),
+                    SessionController.OptimizerStatus.Disconnected => (_estop, "BO Hub: disconnected"),
+                    _                                               => (_pending, "BO Hub: idle")
+                };
+                _connBoTxt.text = l; _connBoTxt.color = c; _connBoDot.color = c;
+            }
+            else { _connBoTxt.text = "BO Hub: —"; _connBoTxt.color = _connBoDot.color = _dim; }
+
+            // GSR
+            var gsr = GSRSerialConnection.Instance;
+            if (gsr == null) { _connGsrTxt.text = "GSR: not present in scene"; _connGsrTxt.color = _connGsrDot.color = _dim; }
+            else
+            {
+                _connGsrTxt.text = gsr.IsConnected ? "GSR: connected" : "GSR: disconnected";
+                _connGsrTxt.color = _connGsrDot.color = gsr.IsConnected ? _accent : _estop;
+            }
+
+            // Polar H10
+            var polar = PolarH10OscConnection.Instance;
+            if (polar == null) { _connPolarTxt.text = "Polar H10: not present in scene"; _connPolarTxt.color = _connPolarDot.color = _dim; }
+            else
+            {
+                _connPolarTxt.text = polar.HasReceivedData ? "Polar H10: receiving" : "Polar H10: listening, no data yet";
+                _connPolarTxt.color = _connPolarDot.color = polar.HasReceivedData ? _accent : _pending;
+            }
         }
 
         // Cells pack starting just below each box's own header (see Card()).

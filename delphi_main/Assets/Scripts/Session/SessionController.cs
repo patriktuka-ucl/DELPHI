@@ -37,9 +37,9 @@ namespace Delphi.Session
     /// FreeRoam — get identical scaffolding, so the only thing that differs
     /// between them is what happens during the drive itself:
     ///
-    ///   Intro → CondIntro[0] → Meditation → Condition[0] → Questionnaire → BreakOffer
-    ///         → CondIntro[1] → Meditation → Condition[1] → Questionnaire → BreakOffer
-    ///         → CondIntro[2] → Meditation → Condition[2] → Questionnaire → Complete
+    ///   Intro → Meditation → CondIntro[0] → Condition[0] → Questionnaire → BreakOffer
+    ///         → Meditation → CondIntro[1] → Condition[1] → Questionnaire → BreakOffer
+    ///         → Meditation → CondIntro[2] → Condition[2] → Questionnaire → Complete
     ///
     /// where a Condition is the iteration loop for Implicit and Explicit, and
     /// (open-ended roaming, ended by the researcher's DONE button) for
@@ -171,7 +171,7 @@ namespace Delphi.Session
         {
             public SegmentKind kind;
             public float seconds;         // timed segments only
-            public ConditionKind condition; // ConditionIntro/Condition segments only
+            public ConditionKind condition; // Meditation/ConditionIntro/Condition segments only
             public int slot;              // 1..3 — which of the three drives this is
         }
 
@@ -188,9 +188,12 @@ namespace Delphi.Session
                  "was mid-flight; ordinary pauses (red light, questionnaire) " +
                  "need no special handling since Speed already holds at 0.")]
         public Delphi.Motion.CarMotionCues motionCues;
-        [Tooltip("How long EmergencyStop takes to slerp the rig back to " +
-                 "level, in seconds.")]
-        public float emergencyReturnToNeutralSeconds = 2f;
+        [Tooltip("How long the rig takes to slerp back to level, in seconds — " +
+                 "used whenever the car goes idle/parked (questionnaire reset) " +
+                 "or an EmergencyStop hits. Moderate pace: noticeable but not " +
+                 "startling. NOT used for ordinary in-drive stops (red lights) " +
+                 "or the per-iteration rating freeze — those keep real forces.")]
+        public float returnToNeutralSeconds = 3f;
         [Tooltip("Plays the spoken instructions at each phase transition.")]
         public NarrationController narration;
         [Tooltip("The per-iteration rating questionnaire, shown during Explicit " +
@@ -405,7 +408,9 @@ namespace Delphi.Session
         private bool _baselineCaptured;
 
         // ── Questionnaire state (Phase.Questionnaire) ───────────────────
+        private bool _questionnaireUiShown;   // trialAsk narration finished, form now visible
         private bool _questionnaireConfirmed;
+        private int _questionnaireSlot;
         private List<Channel> _objectiveChannels = new();
         private List<string> _questionnaireKeys = new();
         private readonly Dictionary<string, float> _pendingQuestionnaireValues = new();
@@ -511,11 +516,11 @@ namespace Delphi.Session
 
         /// <summary>Researcher: the participant has finished the on-screen
         /// questionnaire. Advances immediately — see TickQuestionnaire — the
-        /// car was already reset to start the instant the questionnaire
-        /// appeared, so there's nothing left to wait for.</summary>
+        /// car was already reset to start when the trialAsk narration
+        /// finished, so there's nothing left to wait for.</summary>
         public void ConfirmQuestionnaire()
         {
-            if (CurrentPhase == Phase.Questionnaire) _questionnaireConfirmed = true;
+            if (CurrentPhase == Phase.Questionnaire && _questionnaireUiShown) _questionnaireConfirmed = true;
         }
 
         // The three break paths are all SILENT: 0x_breakAsk (played when the
@@ -626,9 +631,10 @@ namespace Delphi.Session
             IsAwaitingResearcher = true;
 
             // Recording is IDENTICAL across all three conditions: the sensor
-            // csv and every video feed are driven by SessionRecorder, which
-            // StartFreePlayLogging starts exactly as StartConditionTrial does.
-            // These fields only make the trial metadata come out too.
+            // csv and every video feed are driven by SessionRecorder, already
+            // started back at EnterMeditation (covers the meditation/baseline
+            // and the intro narration too, not just the roam itself). These
+            // fields only make the trial metadata come out too.
             _activeConfig = FreeRoamConfig;
             _objectiveChannels = new List<Channel>();
             // _baseline is deliberately NOT cleared: FreeRoam has no optimizer
@@ -651,11 +657,14 @@ namespace Delphi.Session
             // releases it here — the BO conditions un-park at their first iteration,
             // which FreeRoam never reaches — so it has to happen explicitly.
             carDriver?.ResumeDriving();
+            motionCues?.Unfreeze();
             StartFreePlayLogging();
         }
 
         private void StartFreePlayLogging()
         {
+            // Recording is already running (started at EnterMeditation);
+            // this guard is just a fallback in case that call didn't fire.
             if (recorder != null && !recorder.IsRecording)
                 recorder.StartRecording($"trial_{userId}_{conditionId}");
 
@@ -712,7 +721,7 @@ namespace Delphi.Session
             _wasParkedBeforeStop = carDriver != null && carDriver.IsParked;
 
             carDriver?.EmergencyHalt();
-            motionCues?.ReturnToNeutral(emergencyReturnToNeutralSeconds);
+            motionCues?.ReturnToNeutral(returnToNeutralSeconds);
             CurrentPhase = Phase.EmergencyStop;
             _phaseEnd = 0;
             IsAwaitingResearcher = true;
@@ -736,7 +745,14 @@ namespace Delphi.Session
             if (CurrentPhase == Phase.EmergencyStop)
             {
                 motionCues?.CancelReturnToNeutral();
-                if (!_wasParkedBeforeStop) carDriver?.ResumeDriving();
+                // If the e-stop interrupted the frozen rating questionnaire,
+                // the return-to-neutral we just cancelled was overriding that
+                // freeze — re-latch it now the seat has settled, rather than
+                // leaving it live-computing physics for a car that isn't
+                // actually resuming (ResumeDriving is skipped below in this
+                // exact case).
+                if (_interruptedPhase == Phase.AwaitingRating) motionCues?.FreezeInPlace();
+                if (!_wasParkedBeforeStop) { carDriver?.ResumeDriving(); motionCues?.Unfreeze(); }
                 if (_pausedRemaining >= 0) _phaseEnd = DelphiClock.Now + _pausedRemaining;
                 // The idle clock is wall-clock, so a long stop mid-roam would
                 // otherwise trip the nudge the instant we un-pause.
@@ -825,17 +841,19 @@ namespace Delphi.Session
         /// <summary>The plan mirrors the recorded narration one-for-one:
         ///
         ///   00_intro
-        ///   → 01x → 0x_meditation → [drive 1] → park → 02_trialEval1 → 0x_breakAsk
-        ///   → 03x → 0x_meditation → [drive 2] → park → 04_trialEval2 → 0x_breakAsk
-        ///   → 05x → 0x_meditation → [drive 3] → park → 06_trialEval3
+        ///   → 0x_meditation → 01x → [drive 1] → park → 02_trialEval1 → 0x_breakAsk
+        ///   → 0x_meditation → 03x → [drive 2] → park → 04_trialEval2 → 0x_breakAsk
+        ///   → 0x_meditation → 05x → [drive 3] → park → 06_trialEval3
         ///   → 07_closing
         ///
-        /// Every drive gets the same three-step run-up: framing, meditation,
+        /// Every drive gets the same three-step run-up: meditation, framing,
         /// drive. The meditation is where that condition's physiological
         /// baseline is measured (see EnterMeditation), which is exactly why
         /// it repeats before every condition rather than playing once at the
         /// start — each condition needs its own reference means, taken
-        /// minutes apart, under the same settled-with-music conditions.
+        /// minutes apart, under the same settled-with-music conditions. It
+        /// comes before that condition's framing line (01x/03x/05x) rather
+        /// than after, matching the order the lines were recorded in.
         ///
         /// The car is parked throughout (startParked for slot 1, the previous
         /// condition's Questionnaire segment afterwards), so the baseline is
@@ -853,8 +871,8 @@ namespace Delphi.Session
             for (int i = 0; i < order.Length; i++)
             {
                 int slot = i + 1;
+                AddConditionSegment(SegmentKind.Meditation, order[i], slot);
                 AddConditionSegment(SegmentKind.ConditionIntro, order[i], slot);
-                Add(SegmentKind.Meditation);
                 AddConditionSegment(SegmentKind.Condition, order[i], slot);
                 AddSlot(SegmentKind.Questionnaire, slot);
                 if (i < order.Length - 1) Add(SegmentKind.BreakOffer);
@@ -925,7 +943,7 @@ namespace Delphi.Session
                     break;
 
                 case SegmentKind.Meditation:
-                    EnterMeditation();
+                    EnterMeditation(seg.condition, seg.slot);
                     break;
 
                 case SegmentKind.ConditionIntro:
@@ -963,17 +981,13 @@ namespace Delphi.Session
         private float NarrationSeconds(NarrationController.Line line) =>
             narration != null ? narration.WaitSeconds(line) : DefaultNarrationFallbackSeconds;
 
-        /// <summary>The condition's framing narration. Claims the slot
-        /// (ConditionNumber/CurrentConditionKind) and resets the driving
-        /// parameters HERE rather than at the drive itself, so the researcher
-        /// UI already shows which condition is coming while the intro — and,
-        /// for slots 2–3, the meditation after it — is still playing.</summary>
+        /// <summary>The condition's framing narration — played right after
+        /// its meditation/baseline (see BuildPlan), which already claimed the
+        /// slot (ConditionNumber/CurrentConditionKind) and started recording,
+        /// since it now runs first. kind/slot here are only needed to pick
+        /// the right recorded line (ConditionIntroLine).</summary>
         private void EnterConditionIntro(ConditionKind kind, int slot)
         {
-            ConditionNumber = slot;
-            CurrentConditionKind = kind;
-            ResetParametersToNeutral();
-
             var introLine = ConditionIntroLine(slot, kind);
             narration?.Play(introLine);
             CurrentPhase = Phase.ConditionIntro;
@@ -1017,38 +1031,52 @@ namespace Delphi.Session
         }
 
         // ── Questionnaire = evaluation, car reset in the background ─────
-        /// <summary>The drive just ended: play the evaluation line, show the
-        /// evaluation questionnaire, and reset the car back to the start —
-        /// ALL AT ONCE, right here. The questionnaire fills the whole screen,
-        /// so the reset is invisible to the participant regardless of when it
-        /// happens; there's no reason to make it a physical drive somewhere
-        /// (the old RequestPark()-based approach) when an instant teleport
-        /// does the same job without needing the track to be long enough to
-        /// physically reach a marker from wherever THIS drive happened to
-        /// end. See CarDriver.ResetToStart. The segment advances the instant
-        /// the questionnaire is submitted — nothing else to wait for.</summary>
+        /// <summary>The drive just ended: play the evaluation (trialAsk)
+        /// line, reset the car back to the start, and wait for that
+        /// narration to actually finish playing before the questionnaire
+        /// appears — the participant hears the prompt before being handed a
+        /// form, not both at once. The reset happens immediately regardless
+        /// (an instant teleport, not a physical drive — see
+        /// CarDriver.ResetToStart — so there's nothing for the narration to
+        /// visually race against). See TickQuestionnaire for the rest: once
+        /// the clip's own length has elapsed, the questionnaire appears; once
+        /// it's submitted, the segment advances immediately.</summary>
         private void EnterQuestionnaire(int slot)
         {
             CurrentPhase = Phase.Questionnaire;
             _questionnaireConfirmed = false;
+            _questionnaireUiShown = false;
+            _questionnaireSlot = slot;
 
             narration?.Play(TrialEvalLine(slot));
             carDriver?.ResetToStart();
+            motionCues?.ReturnToNeutral(returnToNeutralSeconds);
 
-            if (finalEvaluationQuestionnaire != null)
-            {
-                finalEvaluationQuestionnaire.StartQuestionnaire();
-                StatusLine = "Evaluation questionnaire — waiting for participant";
-            }
-            else
-            {
-                IsAwaitingResearcher = true;
-                StatusLine = "Evaluation — waiting for participant (no QTQuestionnaireManager linked)";
-            }
+            _phaseEnd = DelphiClock.Now + NarrationSeconds(TrialEvalLine(slot));
+            StatusLine = "Playing evaluation prompt…";
         }
 
         private void TickQuestionnaire()
         {
+            if (!_questionnaireUiShown)
+            {
+                if (_phaseEnd > 0 && DelphiClock.Now < _phaseEnd) return;
+                _questionnaireUiShown = true;
+                _phaseEnd = 0;
+
+                if (finalEvaluationQuestionnaire != null)
+                {
+                    finalEvaluationQuestionnaire.StartQuestionnaire();
+                    StatusLine = "Evaluation questionnaire — waiting for participant";
+                }
+                else
+                {
+                    IsAwaitingResearcher = true;
+                    StatusLine = "Evaluation — waiting for participant (no QTQuestionnaireManager linked)";
+                }
+                return;
+            }
+
             if (_questionnaireConfirmed) AdvanceToNextSegment();
         }
 
@@ -1069,9 +1097,23 @@ namespace Delphi.Session
         ///
         /// The phase length is the CLIP's length, so the window follows the
         /// actual recording rather than a typed number that can drift away
-        /// from it.</summary>
-        private void EnterMeditation()
+        /// from it.
+        ///
+        /// This is the first segment of each condition (see BuildPlan), so it
+        /// also claims the slot (ConditionNumber/CurrentConditionKind) and
+        /// starts recording — the researcher UI shows which condition is
+        /// coming, and the csv/video folder for it, from the moment the
+        /// meditation track starts rather than only once the framing line
+        /// (ConditionIntro) plays afterward.</summary>
+        private void EnterMeditation(ConditionKind kind, int slot)
         {
+            ConditionNumber = slot;
+            CurrentConditionKind = kind;
+            ResetParametersToNeutral();
+
+            if (recorder != null && !recorder.IsRecording)
+                recorder.StartRecording($"trial_{userId}_{kind.ToString().ToLowerInvariant()}");
+
             CurrentPhase = Phase.Meditation;
             narration?.Play(NarrationController.Line.Meditation);
 
@@ -1281,7 +1323,10 @@ namespace Delphi.Session
             }
 
             // Recording runs for the whole trial; csv + videos + trial log all
-            // land in one session folder.
+            // land in one session folder. Already started back at
+            // EnterMeditation (covers the meditation/baseline and the
+            // condition-intro narration too) — this guard is just a fallback
+            // in case that call didn't fire.
             if (recorder != null && !recorder.IsRecording)
                 recorder.StartRecording($"trial_{userId}_{conditionId}");
 
@@ -1429,6 +1474,7 @@ namespace Delphi.Session
                     _measureStart = DelphiClock.Now;
                     _pendingQuestionnaireValues.Clear();
                     carDriver?.FreezeInPlace(); // instant halt, not a drive to a (possibly distant) Park marker
+                    motionCues?.FreezeInPlace(); // seat holds real forces exactly as they were, not neutralized
                     questionnaire.StartQuestionnaire();
                 }
                 else
@@ -1475,6 +1521,7 @@ namespace Delphi.Session
                         // applied. No-ops on every later iteration (already
                         // driving by then) — safe/idempotent to call every time.
                         carDriver?.ResumeDriving();
+                        motionCues?.Unfreeze();
                         CurrentPhase = Phase.Washout;
                         _phaseEnd = DelphiClock.Now + EffectiveWashoutSeconds;
                         StatusLine = $"Iteration {Iteration}/{TotalIterations} — washout";
@@ -1776,6 +1823,7 @@ namespace Delphi.Session
             if (CurrentPhase != Phase.AwaitingRating) return;
             SubmitQuestionnaireObjectives();
             carDriver?.ResumeDriving();
+            motionCues?.Unfreeze();
             EnterWaitingForParameters($"Iteration {Iteration}/{TotalIterations} — submitted, waiting");
         }
 
@@ -2113,20 +2161,43 @@ namespace Delphi.Session
             return cfg.iterations * FixedSecondsPerIteration(kind);
         }
 
-        /// <summary>Rough time left in the drive. Deliberately does NOT count
-        /// PhaseSecondsRemaining while WaitingForParameters: that phase's
-        /// _phaseEnd is optimizerResponseTimeoutSeconds — a safety CEILING
-        /// before giving up, not an estimate of how long the optimizer will
-        /// actually take. Counting it made the displayed number tick down
-        /// toward a value that had nothing to do with reality, then jump the
-        /// moment the real parameters arrived — worse than just not
-        /// displaying a number the app doesn't actually have.</summary>
+        /// <summary>Rough time left in the drive, iteration-boundary-aware:
+        /// Iteration counts iterations that have FULLY STARTED (it increments
+        /// the moment parameters for a new one arrive), so the iteration
+        /// currently in flight is never part of itersLeft — its remaining
+        /// time has to come from wherever CurrentPhase actually is:
+        ///
+        ///  • Washout: PhaseSecondsRemaining only covers washout ITSELF. The
+        ///    Measuring phase that follows it, later in this SAME iteration,
+        ///    isn't reflected anywhere else — so for Implicit (which always
+        ///    runs a fixed Measuring phase next) MeasureSeconds is added on
+        ///    top. Leaving that out silently underestimated by exactly
+        ///    MeasureSeconds every single time an Implicit condition was
+        ///    mid-washout.
+        ///  • Measuring: PhaseSecondsRemaining alone is already the whole
+        ///    remaining truth.
+        ///  • WaitingForParameters / AwaitingRating: genuinely nothing
+        ///    knowable to add — WaitingForParameters' own _phaseEnd is
+        ///    optimizerResponseTimeoutSeconds, a safety CEILING before giving
+        ///    up, not an ETA (counting it made the number count down toward
+        ///    a value with nothing to do with reality, then jump once the
+        ///    real result landed); AwaitingRating (Explicit) ends whenever
+        ///    the participant submits, which has no fixed length at all.
+        /// </summary>
         public float CurrentConditionSecondsRemaining()
         {
             if (_activeConfig == null || !IsRunningCondition) return 0f;
             int itersLeft = Mathf.Max(0, TotalIterations - Iteration);
-            double phaseContribution = CurrentPhase == Phase.WaitingForParameters ? 0 : PhaseSecondsRemaining;
-            return (float)phaseContribution + itersLeft * FixedSecondsPerIteration(CurrentConditionKind);
+
+            double currentIterationRemaining = CurrentPhase switch
+            {
+                Phase.Washout => PhaseSecondsRemaining +
+                                 (CurrentConditionKind == ConditionKind.Implicit ? MeasureSeconds : 0),
+                Phase.Measuring => PhaseSecondsRemaining,
+                _ => 0,
+            };
+
+            return (float)currentIterationRemaining + itersLeft * FixedSecondsPerIteration(CurrentConditionKind);
         }
 
         public float CurrentConditionProgress()

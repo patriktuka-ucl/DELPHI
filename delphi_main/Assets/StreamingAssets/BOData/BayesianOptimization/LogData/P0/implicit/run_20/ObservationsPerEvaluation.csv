@@ -1,0 +1,2 @@
+UserID;ConditionID;GroupID;Timestamp;Iteration;Phase;IsPareto;InterBlinkInterval;Gaze;PupilDiameter;accelerationJerk;brakingJerk;followDistance;corneringSpeed;takeoverProbability;speedBelowLimit
+P0;implicit;1;2026-07-27 21:37:07;1;sampling;FALSE;0.003;0.05;0.03;0.068;0.225;0.699;0.063;0.375;0.03
