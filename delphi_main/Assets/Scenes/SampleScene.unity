@@ -1635,6 +1635,7 @@ Transform:
   m_Children:
   - {fileID: 1319649829}
   - {fileID: 1630552710}
+  - {fileID: 705783338}
   m_Father: {fileID: 1037761337}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &174583721
@@ -2105,6 +2106,7 @@ Transform:
   m_Children:
   - {fileID: 500385128}
   - {fileID: 1472681599}
+  - {fileID: 2122961929}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &202818697
@@ -6432,6 +6434,50 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &705783337
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 705783338}
+  - component: {fileID: 705783339}
+  m_Layer: 0
+  m_Name: GSRRawSensor
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &705783338
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 705783337}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 28.10676, y: 0, z: -94.50452}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 171821663}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &705783339
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 705783337}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6b566c47d06528a47ba6d4dd45827243, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.GSRRawSensor
 --- !u!1 &715748410
 GameObject:
   m_ObjectHideFlags: 0
@@ -6994,7 +7040,7 @@ MonoBehaviour:
   player: {fileID: 0}
   dashboardDisplay: 1
   editorPreviewOffset: {x: 0, y: 0}
-  redrawFps: 30
+  redrawFps: 60
 --- !u!1 &752717837
 GameObject:
   m_ObjectHideFlags: 0
@@ -19007,8 +19053,8 @@ MonoBehaviour:
   hrvRmssd: {fileID: 1630552711}
   respRateOn: 0
   respRate: {fileID: 0}
-  gsrOn: 0
-  gsr: {fileID: 0}
+  gsrOn: 1
+  gsr: {fileID: 705783339}
   gsrTonicOn: 0
   gsrTonic: {fileID: 0}
   gsrPhasicOn: 0
@@ -19032,16 +19078,16 @@ MonoBehaviour:
   _debugSavedOn: 
   webcamOn: 1
   webcam: {fileID: 1425785811}
-  webcamFps: 30
-  sceneOverviewOn: 0
+  webcamFps: 60
+  sceneOverviewOn: 1
   sceneOverview: {fileID: 1531519421}
   sceneOverviewFps: 30
-  playerViewOn: 0
+  playerViewOn: 1
   playerView: {fileID: 988303697}
   playerViewFps: 30
-  panorama360On: 0
+  panorama360On: 1
   panorama360: {fileID: 1425288970}
-  panorama360Fps: 10
+  panorama360Fps: 60
 --- !u!4 &1745511444
 Transform:
   m_ObjectHideFlags: 0
@@ -23039,6 +23085,52 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2120055201}
   m_CullTransparentMesh: 0
+--- !u!1 &2122961928
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2122961929}
+  - component: {fileID: 2122961930}
+  m_Layer: 0
+  m_Name: GSRSerialConnection
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2122961929
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2122961928}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 30.84341, y: 0, z: -132.98222}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 198588687}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2122961930
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2122961928}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5e54e231b99e88144b3cbb57fb3ef131, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.GSRSerialConnection
+  portName: COM3
+  baudRate: 115200
 --- !u!1 &2128847993
 GameObject:
   m_ObjectHideFlags: 0

@@ -102,21 +102,34 @@ namespace Delphi.Trial
         }
 
         // ── Socket ──────────────────────────────────────────────────────
+        private TcpClient _pendingTcp;
+        private IAsyncResult _pendingConnect;
+
         /// <summary>Try to connect to the optimizer's server; returns false
-        /// if it isn't accepting yet (call again next frame — the python
-        /// side needs a few seconds to import torch).</summary>
+        /// if it isn't up yet (call again next frame — the python side needs
+        /// a few seconds to import torch). Never blocks the caller: a connect
+        /// in flight is just polled via IsCompleted, same as every other IO
+        /// connection in this project staying off the main thread.</summary>
         public bool TryConnect()
         {
             if (Connected) return true;
+
+            if (_pendingConnect == null)
+            {
+                _pendingTcp = new TcpClient();
+                _pendingConnect = _pendingTcp.BeginConnect("127.0.0.1", Port, null, null);
+                return false;
+            }
+
+            if (!_pendingConnect.IsCompleted) return false; // still connecting
+
+            var tcp = _pendingTcp;
+            var result = _pendingConnect;
+            _pendingTcp = null;
+            _pendingConnect = null;
+
             try
             {
-                var tcp = new TcpClient();
-                var result = tcp.BeginConnect("127.0.0.1", Port, null, null);
-                if (!result.AsyncWaitHandle.WaitOne(250))
-                {
-                    tcp.Close();
-                    return false;
-                }
                 tcp.EndConnect(result);
                 _tcp = tcp;
                 _stream = tcp.GetStream();
@@ -127,7 +140,8 @@ namespace Delphi.Trial
             }
             catch (SocketException)
             {
-                return false; // server not up yet
+                tcp.Close();
+                return false; // server not up yet — next call starts a fresh attempt
             }
         }
 
@@ -189,6 +203,9 @@ namespace Delphi.Trial
         public void Dispose()
         {
             _running = false;
+            try { _pendingTcp?.Close(); } catch { }
+            _pendingTcp = null;
+            _pendingConnect = null;
             try { _stream?.Close(); } catch { }
             try { _tcp?.Close(); } catch { }
             try { _reader?.Join(300); } catch { }

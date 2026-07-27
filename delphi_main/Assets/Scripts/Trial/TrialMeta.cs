@@ -74,7 +74,7 @@ namespace Delphi.Trial
     public class TrialObjectiveMeta
     {
         public string channel;
-        public string sensorType;       // e.g. "MockSensor_Scalar", "GSRSensorSerial"
+        public string sensorType;       // e.g. "MockSensor_Scalar", "GSRRawSensor"
         public string sensorObjectName; // GameObject the sensor is on
         public float baselineMean;      // reference mean over the baseline averaging window
         public float literatureSd;      // native-unit SD the researcher supplied (NOT measured from baseline)

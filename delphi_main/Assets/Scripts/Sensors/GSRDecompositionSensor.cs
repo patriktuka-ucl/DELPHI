@@ -34,7 +34,7 @@ namespace Delphi
     public abstract class GSRDecompositionSensor : ScalarSensor
     {
         [Header("Source")]
-        [Tooltip("The RAW GSR sensor to decompose — e.g. the GSRSensorSerial " +
+        [Tooltip("The RAW GSR sensor to decompose — e.g. the GSRRawSensor " +
                  "feeding the 'GSR (raw)' slot, or a mock for testing.")]
         [SerializeField] protected ScalarSensor source;
 

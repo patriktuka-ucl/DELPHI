@@ -34,7 +34,8 @@ namespace Delphi
         /// that are main-thread-only (Time, Random, transforms, GameObjects
         /// …). Use DelphiClock.Now for time and System.Random for noise.
         /// IO-backed sensors should acquire on their own thread and just
-        /// hand over the latest latched value here (see GSRSensorSerial).
+        /// hand over the latest latched value here (see GSRSerialConnection
+        /// + GSRRawSensor, or PolarH10OscConnection + PolarH10ChannelReader).
         /// </summary>
         public abstract float ReadValue();
     }
