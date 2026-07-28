@@ -50,7 +50,8 @@ namespace Delphi.Motion
             _nextTick += 1.0 / Mathf.Max(1f, logRateHz);
 
             _writer.WriteLine(string.Join(",",
-                F(t), F(cues.SurgeG), F(cues.LateralG), F(cues.PitchDeg), F(cues.RollDeg)));
+                F(t), F(cues.AccelMs2), F(cues.SpeedGapMs), F(cues.YawRateDegPerSec),
+                F(cues.PitchDeg), F(cues.RollDeg), F(cues.YawDeg)));
         }
 
         private void Open()
@@ -58,7 +59,9 @@ namespace Delphi.Motion
             string dir = recorder.CurrentSessionPath;
             if (string.IsNullOrEmpty(dir)) return;
             _writer = new StreamWriter(Path.Combine(dir, "motion_log.csv"));
-            _writer.WriteLine("time_s,surge_g,lateral_g,pitch_deg,roll_deg");
+            // Schema changed when the cue moved off g-forces onto the car's own
+            // commanded motion — logs written before that are NOT comparable.
+            _writer.WriteLine("time_s,accel_ms2,speed_gap_ms,yaw_rate_dps,pitch_deg,roll_deg,yaw_deg");
             _clockStart = DelphiClock.Now;
             _nextTick = 0;
         }

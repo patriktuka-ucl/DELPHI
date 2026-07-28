@@ -381,6 +381,19 @@ namespace Delphi.Motion
                  "rig. Lower = gentler ramp, higher = snappier response.")]
         public float manualMaxDegreesPerSecond = 15f;
 
+        [Header("Wire deadband — the rig slews to whatever angle each packet " +
+                 "names, so a value that dithers in the last decimal makes it " +
+                 "hunt back and forth in place. Angles are quantised to the " +
+                 "0.01° the protocol actually carries, then held until they " +
+                 "move by at least this much; the rig still gets a packet " +
+                 "every tick, it just gets a BIT-IDENTICAL one while the seat " +
+                 "is settled instead of a ±0.01° twitch.")]
+        [Range(0f, 1f)] public float minAngleChangeDeg = 0.05f;
+
+        // Last angles actually put on the wire, so the deadband above has
+        // something to hold. NaN = nothing sent yet this session.
+        private float _sentYaw = float.NaN, _sentPitch = float.NaN, _sentRoll = float.NaN;
+
         /// <summary>While set, motion ticks ramp toward THESE angles instead
         /// of reading CarMotionCues. For YawVR3Tester's safe manual testing —
         /// not used anywhere in the normal driving path.</summary>
@@ -412,16 +425,28 @@ namespace Delphi.Motion
                 yaw = _manualCurrent.y;
                 roll = _manualCurrent.z;
             }
-            else if (cues != null && cues.referenceTransform != null)
+            else if (cues != null)
             {
-                // Transform.localEulerAngles is already Unity's canonical
-                // 0-360 unsigned decomposition — exactly the form the wire
-                // protocol wants, no extra sign handling needed.
-                var e = cues.referenceTransform.localEulerAngles;
-                pitch = e.x;
-                yaw = e.y;
-                roll = e.z;
+                // Straight from the commanded angles, NOT from the reference
+                // transform's localEulerAngles. That used to be the transport,
+                // and it is lossy: CarMotionCues builds the transform with
+                // Quaternion.Euler(pitch, yaw, -roll), and re-decomposing a
+                // quaternion back to Euler is not the identity once two axes
+                // are non-zero — Unity picks its own canonical branch, so with
+                // yaw accumulating through a corner the pitch/roll convention
+                // could flip mid-drive. The transform is still written, purely
+                // for the Scene view and the researcher UI.
+                pitch = cues.PitchDeg;
+                yaw = cues.YawDeg;
+                roll = -cues.RollDeg;   // same sign convention the transform used
             }
+
+            // Quantise to the resolution the wire actually carries (FormatRotation
+            // truncates to 0.01°), then hold unless the change is worth making —
+            // see minAngleChangeDeg.
+            yaw = Deadband(yaw, ref _sentYaw);
+            pitch = Deadband(pitch, ref _sentPitch);
+            roll = Deadband(roll, ref _sentRoll);
 
             int buzz = 0;
             if (rumbleEnabled && car != null)
@@ -431,6 +456,17 @@ namespace Delphi.Motion
             string message = $"Y[{FormatRotation(yaw)}]P[{FormatRotation(pitch)}]R[{FormatRotation(roll)}]" +
                               $"V[{buzz},{buzz},{buzz},{rumbleHz}]";
             SendUdpToDevice(message);
+        }
+
+        /// <summary>Quantise to the wire's own 0.01° resolution and return the
+        /// previously-sent value unless the new one has moved by at least
+        /// minAngleChangeDeg. `sent` carries the held value between ticks.</summary>
+        private float Deadband(float value, ref float sent)
+        {
+            float quantised = Mathf.Round(value * 100f) / 100f;
+            if (float.IsNaN(sent) || Mathf.Abs(quantised - sent) >= minAngleChangeDeg)
+                sent = quantised;
+            return sent;
         }
 
         private void SendUdpToDevice(string message)

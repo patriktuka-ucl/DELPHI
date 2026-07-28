@@ -500,6 +500,22 @@ namespace Delphi
             _                     => null
         };
 
+        /// <summary>For hardware bridges that serve several channels at once
+        /// (PolarH10OscConnection: HR/RMSSD/Acc; GSRSerialConnection: GSR) —
+        /// lets them skip connecting entirely (no Python process, no serial
+        /// port) when EVERY channel they'd feed is disabled here, rather than
+        /// opening a real connection nothing downstream will ever read.
+        /// Deliberately reads the RAW toggle, not IsOn's debug-feed override —
+        /// Debug Constant Feed already forces every real toggle off (see
+        /// SetDebugConstantFeed), and a bridge should stay disconnected during
+        /// debug mode precisely because nothing needs real hardware then.</summary>
+        public bool IsAnyChannelOn(params Channel[] channels)
+        {
+            foreach (var ch in channels)
+                if (IsOnRaw(ch)) return true;
+            return false;
+        }
+
         // In debug every channel samples (regardless of the cleared toggles).
         private bool IsOn(Channel ch) => debugConstantFeed || IsOnRaw(ch);
 

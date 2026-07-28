@@ -129,6 +129,12 @@ namespace Delphi.Simulation
     /// </summary>
     public class CarDriver : RouteVehicle
     {
+        /// <summary>Which term actually decided this frame's target speed —
+        /// i.e. WHAT is holding the car back right now. Purely diagnostic
+        /// (nothing in the driving logic reads it), but it's the difference
+        /// between seeing "the car won't go above 35" and knowing why.</summary>
+        public enum SpeedLimiter { Parked, RedLight, Corner, Cruise }
+
         [Header("Parameters (normally driven by the optimiser)")]
         public DrivingParameters parameters = new DrivingParameters();
 
@@ -153,8 +159,53 @@ namespace Delphi.Simulation
         private bool _headingToPark;
         private bool _parkingInPlace; // braking to a halt where it stands, no marker to aim at
         private TrackEvent _targetPark; // the specific marker this park request is aimed at
+        private float _settleSpeed;     // where ComputeTargetSpeed says this manoeuvre ENDS
 
         public float CurrentSpeedKmh => Speed * 3.6f;
+
+        // ── Motion state, published for the seat cue and the researcher UI ──
+        // Everything here is what the car ALREADY KNOWS about its own intent,
+        // published in plain physical units. Nothing downstream has to
+        // differentiate Speed or the transform to recover it — doing that was
+        // the source of the frame-to-frame jitter the rig turned into a jerk.
+
+        /// <summary>Speed the car is currently trying to reach (m/s).</summary>
+        public float TargetSpeed { get; private set; }
+        public float TargetSpeedKmh => TargetSpeed * 3.6f;
+
+        /// <summary>The speed the CURRENT MANOEUVRE ends at (m/s) — not
+        /// necessarily this frame's target. On a red-light or park approach
+        /// the target follows the √(2·a·d) curve steadily downward, so it is a
+        /// moving waypoint, not a destination; the destination is 0. Everywhere
+        /// else the two are the same.</summary>
+        public float SettleSpeed { get; private set; }
+
+        /// <summary>SettleSpeed − Speed (m/s, signed): how much speed change
+        /// this manoeuvre still has left to do. Positive = still speeding up,
+        /// negative = still slowing down, ~0 = settled. Deliberately measured
+        /// against SettleSpeed and not TargetSpeed: on a red-light approach the
+        /// car tracks its moving target so closely that a gap-to-target would
+        /// read ~0 for the whole descent and claim nothing is happening, while
+        /// the car is in fact braking hard from 40 km/h to a standstill.</summary>
+        public float SpeedGap { get; private set; }
+
+        /// <summary>The acceleration actually applied this frame (m/s²,
+        /// signed; + = speeding up), from RouteVehicle.AppliedAccel — exact,
+        /// measured inside the speed step itself, and bounded by construction
+        /// (MoveTowards can never move further than magnitude × dt, so this
+        /// can never spike above the style's own rate).</summary>
+        public float CommandedAccel { get; private set; }
+
+        /// <summary>How fast the car is changing heading (rad/s, signed;
+        /// + = turning right). Derived from road geometry × speed
+        /// (Track.SignedCurvatureAt), NOT from the transform's rotation delta
+        /// — the transform chases its heading through a Slerp, so differencing
+        /// it yields noise rather than turn rate.</summary>
+        public float YawRateRadPerSec { get; private set; }
+
+        /// <summary>What's governing the target speed this frame.</summary>
+        public SpeedLimiter Limiter { get; private set; } = SpeedLimiter.Parked;
+
         /// <summary>True whenever the car is sitting stopped and NOT counting
         /// down toward an automatic resume — either it hasn't been told to
         /// start yet, or it arrived at the Park marker. False while merely
@@ -305,9 +356,27 @@ namespace Delphi.Simulation
                 Debug.Log($"[CarDriver] Tightest curve on this road: ~{1f / maxCurvature:F0}m radius.");
         }
 
+        /// <summary>Publish motion state for a frame where the car isn't
+        /// driving: nothing to accelerate toward, no heading change. Called on
+        /// EVERY non-driving path so the seat cue and the researcher UI can
+        /// never read values left over from the last frame the car moved.</summary>
+        private void PublishStationary(SpeedLimiter limiter)
+        {
+            TargetSpeed = 0f;
+            SettleSpeed = 0f;
+            SpeedGap = 0f;
+            CommandedAccel = 0f;
+            YawRateRadPerSec = 0f;
+            Limiter = limiter;
+        }
+
         private void Update()
         {
-            if (!track.IsReady || _finished) return;
+            if (!track.IsReady || _finished)
+            {
+                if (_finished) PublishStationary(SpeedLimiter.Parked);
+                return;
+            }
             float dt = Time.deltaTime;
 
             // ── Parked — not driving at all until ResumeDriving() ────
@@ -316,6 +385,7 @@ namespace Delphi.Simulation
             if (_isParked)
             {
                 HoldStopped();
+                PublishStationary(SpeedLimiter.Parked);
                 return;
             }
 
@@ -323,6 +393,7 @@ namespace Delphi.Simulation
             if (_waitingAtRedLight)
             {
                 HoldStopped();
+                PublishStationary(SpeedLimiter.RedLight);
                 _waitTimer -= dt;
                 if (_waitTimer <= 0f)
                 {
@@ -334,8 +405,9 @@ namespace Delphi.Simulation
 
             // ── Target speed this frame, then move toward it at THIS
             // style's own constant accel/decel magnitude ─────────────
-            float targetSpeed = ComputeTargetSpeed();
+            float targetSpeed = ComputeTargetSpeed();   // also sets Limiter and _settleSpeed
             StepSpeed(targetSpeed, parameters.AccelJerk, parameters.BrakeJerk, dt);
+            PublishDrivingState(targetSpeed);
 
             // Parking with nowhere to aim: brake at this style's own rate and
             // latch parked once stopped, so the state the session reads
@@ -345,6 +417,7 @@ namespace Delphi.Simulation
                 _parkingInPlace = false;
                 _isParked = true;
                 HoldStopped();
+                PublishStationary(SpeedLimiter.Parked);
                 if (logStateChanges) Debug.Log($"[CarDriver] Parked in place (s={S:F0}m).");
                 PlaceOnRoute(dt);
                 return;
@@ -366,6 +439,7 @@ namespace Delphi.Simulation
                 _waitTimer = light.waitDuration;
                 _servedLights.Add(light);
                 HoldStopped();
+                PublishStationary(SpeedLimiter.RedLight);
                 if (logStateChanges)
                     Debug.Log($"[CarDriver] Stopped at red light (s={stopS:F0}m), waiting {light.waitDuration}s.");
                 PlaceOnRoute(dt);
@@ -381,6 +455,7 @@ namespace Delphi.Simulation
                 _isParked = true;
                 _headingToPark = false;
                 HoldStopped();
+                PublishStationary(SpeedLimiter.Parked);
                 if (logStateChanges) Debug.Log($"[CarDriver] Parked (s={_targetPark.S:F0}m).");
                 _targetPark = null;
                 PlaceOnRoute(dt);
@@ -404,6 +479,7 @@ namespace Delphi.Simulation
                 _targetPark = null;
                 _isParked = true;
                 HoldStopped();
+                PublishStationary(SpeedLimiter.Parked);
                 Debug.LogWarning($"[CarDriver] Reached the END of the track ({track.TotalLength:F0} m) and " +
                                   "parked. If a condition is still running, the car will now stay " +
                                   "stationary for the rest of it — extend the track so one pass covers " +
@@ -413,12 +489,37 @@ namespace Delphi.Simulation
             PlaceOnRoute(dt);
         }
 
+        /// <summary>Publish motion state for a frame where the car IS driving.
+        /// Called AFTER StepSpeed so AppliedAccel and Speed are both this
+        /// frame's. CommandedAccel is clamped to the relevant axis's own range
+        /// max, so the "jerk off = instant" sentinel (an absurd 1e5 used purely
+        /// to make MoveTowards snap in one frame) never leaks out as a physical
+        /// acceleration — off reads as "the hardest this style set allows"
+        /// rather than as a number that would peg the motion rig.</summary>
+        private void PublishDrivingState(float targetSpeed)
+        {
+            TargetSpeed = targetSpeed;
+            SettleSpeed = _settleSpeed;
+            SpeedGap = _settleSpeed - Speed;
+
+            float cap = AppliedAccel >= 0f ? parameters.accelJerkMax : parameters.brakeJerkMax;
+            CommandedAccel = Mathf.Clamp(AppliedAccel, -cap, cap);
+
+            YawRateRadPerSec = track.SignedCurvatureAt(S) * Speed;
+        }
+
         // ── Target speed from road knowledge ────────────────────────────
+        // Also records WHICH term won (Limiter) — every branch that lowers
+        // `target` claims it, so the last claim standing is by construction
+        // the binding constraint. That readout is the whole answer to "why
+        // won't the car go faster than X".
         private float ComputeTargetSpeed()
         {
             // Cruise: posted limit minus the style-dependent margin.
             float cruiseKmh = Mathf.Max(5f, track.SpeedLimitAt(S) - parameters.SpeedBelowLimitKmh);
             float target = cruiseKmh / 3.6f;
+            Limiter = SpeedLimiter.Cruise;
+            _settleSpeed = target;
 
             // Corners: continuous curvature limit AT the car's current position
             // (the geometry IS the corner — no lookahead, no corner events).
@@ -431,12 +532,22 @@ namespace Delphi.Simulation
                 const float tightCornerRadius = 10f;
                 float narrowness = Mathf.Clamp01(curvature * tightCornerRadius);
                 float slowdownKmh = parameters.CornerSlowdownKmh * narrowness;
-                target = Mathf.Max(0f, target - slowdownKmh / 3.6f);
+                if (slowdownKmh > 0.1f)
+                {
+                    target = Mathf.Max(0f, target - slowdownKmh / 3.6f);
+                    Limiter = SpeedLimiter.Corner;
+                    _settleSpeed = target;
+                }
             }
 
             // Parking in place: commanded to zero, braked at this style's own
             // rate by StepSpeed (same as any other slow-down).
-            if (_parkingInPlace) return 0f;
+            if (_parkingInPlace)
+            {
+                Limiter = SpeedLimiter.Parked;
+                _settleSpeed = 0f;
+                return 0f;
+            }
 
             // Red light: anticipatory braking curve toward the stop line —
             // v = √(2·brakingJerk·distanceRemaining). brakingJerk here is the
@@ -452,7 +563,14 @@ namespace Delphi.Simulation
             {
                 float distanceRemaining = Mathf.Max(0f, stopS - S);
                 float approachLimit = Mathf.Sqrt(2f * parameters.BrakeJerk * distanceRemaining);
-                target = Mathf.Min(target, approachLimit);
+                if (approachLimit < target)
+                {
+                    target = approachLimit;
+                    Limiter = SpeedLimiter.RedLight;
+                    // The approach curve is a moving waypoint; the manoeuvre
+                    // ends at the stop line, stationary.
+                    _settleSpeed = 0f;
+                }
             }
 
             // Same anticipatory braking curve, aimed at the Park marker
@@ -461,7 +579,12 @@ namespace Delphi.Simulation
             {
                 float distanceRemaining = Mathf.Max(0f, _targetPark.S - S);
                 float approachLimit = Mathf.Sqrt(2f * parameters.BrakeJerk * distanceRemaining);
-                target = Mathf.Min(target, approachLimit);
+                if (approachLimit < target)
+                {
+                    target = approachLimit;
+                    Limiter = SpeedLimiter.Parked;
+                    _settleSpeed = 0f;
+                }
             }
 
             return Mathf.Max(0f, target);

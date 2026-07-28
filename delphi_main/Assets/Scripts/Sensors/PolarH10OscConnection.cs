@@ -94,6 +94,15 @@ namespace Delphi
             }
             Instance = this;
 
+            var mgr = FindFirstObjectByType<DelphiManager>();
+            if (mgr != null && !mgr.IsAnyChannelOn(Channel.HeartRate, Channel.RMSSD,
+                                                    Channel.AccX, Channel.AccY, Channel.AccZ))
+            {
+                Debug.Log("[PolarH10OscConnection] HeartRate/RMSSD/Acc all disabled in DelphiManager — skipping connection.");
+                enabled = false;
+                return;
+            }
+
             try
             {
                 _udpClient = new UdpClient(listenPort);

@@ -304,7 +304,8 @@ namespace Delphi
             {
                 float s = session.carDriver.S;
                 float total = Mathf.Max(1f, session.carDriver.track.TotalLength);
-                _trackPosTxt.text = $"Track: {s:F0}m / {total:F0}m ({100f * s / total:F0}%)";
+                string speed = session.carDriver.IsParked ? "parked" : $"{session.carDriver.CurrentSpeedKmh:F0} km/h";
+                _trackPosTxt.text = $"Speed: {speed}    Track: {s:F0}m / {total:F0}m ({100f * s / total:F0}%)";
             }
             else _trackPosTxt.text = "Track: —";
 
@@ -773,7 +774,14 @@ namespace Delphi
         // gizmo, then Connections, then Event Log, top edge matching the
         // Sensor Grid's own (GridY0). Each Y computed where used, same
         // derive-from-the-one-above pattern as the left column.
-        private const float GizmoCardH = 220, ConnectionsCardH = 240;
+        // GizmoGraphicsH is the crosshair/compass block's own height — every
+        // graphic in it is positioned from THAT, not from the card height, so
+        // growing the card to fit the speed strip along its bottom leaves the
+        // gizmo exactly where it was. Cards below derive their Y from
+        // GizmoCardH, so the whole right column reflows on its own.
+        private const float GizmoGraphicsH = 220;
+        private const float SpeedStripH = 52;
+        private const float GizmoCardH = GizmoGraphicsH + SpeedStripH, ConnectionsCardH = 240;
 
         private void BuildTrialCard(Transform root)
         {
@@ -864,7 +872,7 @@ namespace Delphi
             var card = Card(root, "Forces (commanded)", new Vector2(RightColumnX, GridY0), new Vector2(452, GizmoCardH));
             var host = card.transform;
 
-            float centerY = -(GizmoCardH - CardHeaderH) / 2f - 6f;
+            float centerY = -(GizmoGraphicsH - CardHeaderH) / 2f - 6f;
             _crosshairOrigin = new Vector2(120, centerY);
             _compassOrigin = new Vector2(330, centerY);
 
@@ -898,6 +906,7 @@ namespace Delphi
             ringImg.color = new Color(yawColor.r, yawColor.g, yawColor.b, 0.5f);
             ringImg.raycastTarget = false;
             var ringRt = ringImg.rectTransform;
+            ringRt.anchorMin = ringRt.anchorMax = new Vector2(0f, 1f); // top-left, matching every other element here
             ringRt.pivot = new Vector2(0.5f, 0.5f);
             ringRt.anchoredPosition = _compassOrigin;
             ringRt.sizeDelta = new Vector2((GizmoMaxLen + 6f) * 2f, (GizmoMaxLen + 6f) * 2f);
@@ -913,11 +922,96 @@ namespace Delphi
             var yawLabel = Txt(host, "YAW", 11, yawColor, _compassOrigin + new Vector2(-20, GizmoMaxLen + 16), new Vector2(70, 16));
             yawLabel.fontStyle = FontStyle.Bold;
 
-            _gizmoValuesTxt = Txt(host, "", 12, _dim, new Vector2(16, -(GizmoCardH - CardHeaderH - 14)), new Vector2(420, 20));
+            _gizmoValuesTxt = Txt(host, "", 12, _dim, new Vector2(16, -(GizmoGraphicsH - CardHeaderH - 14)), new Vector2(420, 20));
+
+            BuildSpeedStrip(host);
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        //  SPEED STRIP — how fast the car is going, what it's TRYING to go,
+        //  and what's stopping it from going faster. That last part is the
+        //  point: the cruise target is the posted limit minus the
+        //  speedBelowLimit margin minus the corner slowdown, so "why won't it
+        //  exceed X" has several possible answers and guessing between them
+        //  from a bare speed number is impossible. CarDriver.Limiter names
+        //  whichever term actually bound the target this frame.
+        // ════════════════════════════════════════════════════════════════
+        private const float SpeedBarX = 16, SpeedBarW = 420;
+        private Text _speedBigTxt, _speedTargetTxt, _speedLimiterTxt;
+        private Slider _speedBar;
+        private Image _speedTargetTick;
+
+        private void BuildSpeedStrip(Transform host)
+        {
+            float y = -GizmoGraphicsH;
+
+            _speedBigTxt = Txt(host, "— km/h", 24, _accent, new Vector2(SpeedBarX, y + 2), new Vector2(150, 34));
+            _speedBigTxt.fontStyle = FontStyle.Bold;
+
+            _speedTargetTxt = Txt(host, "", 12, _dim, new Vector2(168, y + 2), new Vector2(268, 18));
+            _speedLimiterTxt = Txt(host, "", 12, _dim, new Vector2(168, y - 14), new Vector2(268, 18));
+            _speedLimiterTxt.fontStyle = FontStyle.Bold;
+
+            _speedBar = Bar(host, new Vector2(SpeedBarX, y - 36), new Vector2(SpeedBarW, 8), _accent);
+
+            // Thin marker sitting ON the bar at the target speed — the gap
+            // between the fill edge and this tick is the speed the car is
+            // still trying to pick up.
+            _speedTargetTick = NewImage(host, _text);
+            var trt = _speedTargetTick.rectTransform;
+            trt.pivot = new Vector2(0.5f, 0.5f);
+            trt.sizeDelta = new Vector2(2, 16);
+            trt.anchoredPosition = new Vector2(SpeedBarX, y - 40);
+        }
+
+        private void RefreshSpeedStrip()
+        {
+            var car = session != null ? session.carDriver : null;
+            if (car == null || car.track == null)
+            {
+                _speedBigTxt.text = "— km/h";
+                _speedBigTxt.color = _dim;
+                _speedTargetTxt.text = "no CarDriver in scene";
+                _speedLimiterTxt.text = "";
+                _speedBar.SetValueWithoutNotify(0f);
+                _speedTargetTick.enabled = false;
+                return;
+            }
+
+            // The bar's full scale is the POSTED limit here, not the target —
+            // so the headroom the driving style is giving away stays visible
+            // rather than being normalised out of existence.
+            float postedKmh = Mathf.Max(1f, car.track.SpeedLimitAt(car.S));
+            float speedKmh = car.CurrentSpeedKmh;
+            float targetKmh = car.TargetSpeedKmh;
+
+            _speedBigTxt.text = $"{speedKmh:F0} km/h";
+            _speedBigTxt.color = car.IsParked ? _dim : _accent;
+            _speedBar.SetValueWithoutNotify(Mathf.Clamp01(speedKmh / postedKmh));
+
+            _speedTargetTick.enabled = true;
+            var trt = _speedTargetTick.rectTransform;
+            trt.anchoredPosition = new Vector2(
+                SpeedBarX + SpeedBarW * Mathf.Clamp01(targetKmh / postedKmh),
+                trt.anchoredPosition.y);
+
+            _speedTargetTxt.text = $"target {targetKmh:F1}   ·   posted {postedKmh:F0} km/h";
+
+            var (label, color) = car.Limiter switch
+            {
+                CarDriver.SpeedLimiter.RedLight => ("held by: red light ahead", _estop),
+                CarDriver.SpeedLimiter.Corner   => ("held by: corner slowdown", _running),
+                CarDriver.SpeedLimiter.Cruise   => ("held by: cruise margin below limit", _accent),
+                _                                => ("held by: parked / stopping", _dim)
+            };
+            _speedLimiterTxt.text = label;
+            _speedLimiterTxt.color = color;
         }
 
         private void RefreshForcesGizmo()
         {
+            RefreshSpeedStrip();
+
             var yaw = YawVR3Connection.Instance;
             var cues = yaw != null && yaw.cues != null ? yaw.cues : FindFirstObjectByType<CarMotionCues>();
 
@@ -941,7 +1035,12 @@ namespace Delphi
             float needleMathAngle = 90f - headingDeg;
             SetVectorLine(_compassNeedle, _compassOrigin, needleMathAngle, GizmoMaxLen, 4f);
 
-            _gizmoValuesTxt.text = $"pitch {cues.PitchDeg:0.#}°   roll {cues.RollDeg:0.#}°   yaw {headingDeg:0.#}°";
+            // accel shows car → seat: the left number is what the car is doing,
+            // the right what the jerk limiter has let through to the lean yet.
+            // They diverge during an onset and re-converge once it's ramped in.
+            _gizmoValuesTxt.text = $"pitch {cues.PitchDeg:0.#}°   roll {cues.RollDeg:0.#}°   yaw {headingDeg:0.#}°   " +
+                                    $"·   accel {cues.AccelMs2:0.0}→{cues.ShapedAccelMs2:0.0} m/s²   " +
+                                    $"turn {cues.YawRateDegPerSec:0.0}°/s";
         }
 
         private Image MakeVectorLine(Transform parent, Color color)
@@ -1076,7 +1175,7 @@ namespace Delphi
                 var cues = yaw.cues;
                 _connYawCuesTxt.text = cues != null
                     ? $"cues — pitch {cues.PitchDeg:0.#}°  roll {cues.RollDeg:0.#}°  " +
-                      $"(surge {cues.SurgeG:0.00}g  lateral {cues.LateralG:0.00}g)"
+                      $"(accel {cues.AccelMs2:0.00} m/s²  turn {cues.YawRateDegPerSec:0.0}°/s)"
                     : "cues — no CarMotionCues found";
 
                 bool canStart = yaw.State == YawConnectionState.Connected;

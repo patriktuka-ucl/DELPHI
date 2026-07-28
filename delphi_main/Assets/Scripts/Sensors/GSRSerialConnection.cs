@@ -46,6 +46,14 @@ namespace Delphi
                 return;
             }
             Instance = this;
+
+            var mgr = FindFirstObjectByType<DelphiManager>();
+            if (mgr != null && !mgr.IsAnyChannelOn(Channel.GSR, Channel.GsrTonic, Channel.GsrPhasic))
+            {
+                Debug.Log("[GSRSerialConnection] GSR/GsrTonic/GsrPhasic all disabled in DelphiManager — skipping connection.");
+                return;
+            }
+
             Connect();
         }
 

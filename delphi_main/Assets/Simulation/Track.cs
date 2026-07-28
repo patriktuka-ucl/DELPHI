@@ -35,6 +35,15 @@ namespace Delphi.Simulation
                  "curvature; raise it only if hairpins look faceted.")]
         public float samplesPerMeter = 1f;
 
+        [Tooltip("Half-width (m) of the three-point stencil CurvatureAt uses. " +
+                 "Must be comfortably WIDER than the LUT spacing above: at 1 " +
+                 "sample/metre, a stencil of a metre or two mostly measures " +
+                 "the LUT's own linear-interpolation error, and that noise " +
+                 "then flickers the car's corner slowdown — and therefore its " +
+                 "target speed — every single frame. 6 m buries the noise and " +
+                 "still resolves the ~10 m bend CarDriver treats as 'tight'.")]
+        public float curvatureSampleSpanMeters = 6f;
+
         [Header("Debug")]
         [Tooltip("Draw the driving line, event markers, and distance labels. " +
                  "The line/markers are REAL geometry (built and kept live in " +
@@ -317,11 +326,19 @@ namespace Delphi.Simulation
             return d.sqrMagnitude > 1e-8f ? d.normalized : transform.forward;
         }
 
-        /// <summary>Curvature (1/radius, metres) at s — three-point method,
-        /// no dependency on any Splines-package curvature API.</summary>
-        public float CurvatureAt(float s)
+        /// <summary>Curvature magnitude (1/radius, metres) at s — three-point
+        /// method, no dependency on any Splines-package curvature API.</summary>
+        public float CurvatureAt(float s) => Mathf.Abs(SignedCurvatureAt(s));
+
+        /// <summary>Curvature at s WITH a turn direction: positive = the road
+        /// bends right (clockwise seen from above), negative = left. Sign
+        /// comes from the cross product of the two sample chords, so it's the
+        /// road's own geometry — nothing here differentiates the vehicle's
+        /// transform, which is why this stays smooth frame to frame where a
+        /// rotation delta would not.</summary>
+        public float SignedCurvatureAt(float s)
         {
-            const float h = 1.5f;
+            float h = Mathf.Max(1f, curvatureSampleSpanMeters);
             Vector3 a = EvaluatePosition(Mathf.Max(0f, s - h));
             Vector3 c = EvaluatePosition(s);
             Vector3 b = EvaluatePosition(Mathf.Min(TotalLength, s + h));
@@ -330,7 +347,9 @@ namespace Delphi.Simulation
             if (v1.sqrMagnitude < 1e-6f || v2.sqrMagnitude < 1e-6f) return 0f;
             float angle = Vector3.Angle(v1, v2) * Mathf.Deg2Rad;
             float arc = v2.magnitude;
-            return arc > 1e-4f ? angle / arc : 0f;
+            if (arc <= 1e-4f) return 0f;
+            float sign = Mathf.Sign(Vector3.Cross(v1, v2).y);
+            return sign * angle / arc;
         }
 
         /// <summary>Project a world point onto the track; returns arc length s

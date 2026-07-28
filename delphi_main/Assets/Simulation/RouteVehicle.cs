@@ -64,13 +64,30 @@ namespace Delphi.Simulation
         protected void StepSpeed(float targetSpeed, float accelMagnitude, float brakeMagnitude, float dt)
         {
             float magnitude = targetSpeed >= Speed ? accelMagnitude : brakeMagnitude;
+            float before = Speed;
             Speed = Mathf.MoveTowards(Speed, targetSpeed, Mathf.Max(0.01f, magnitude) * dt);
+            AppliedAccel = dt > 0f ? (Speed - before) / dt : 0f;
         }
+
+        /// <summary>The acceleration the last StepSpeed actually applied
+        /// (m/s², signed; + = speeding up). Measured HERE, where both ends of
+        /// the step are known exactly, rather than reconstructed downstream by
+        /// differencing Speed across frames — that reconstruction is what used
+        /// to feed frame-to-frame noise into the motion rig.
+        ///
+        /// Note this is the APPLIED value, not the style's nominal magnitude.
+        /// They differ exactly where it matters: on a red-light approach the
+        /// commanded target follows the √(2·a·d) curve down, so Speed sits
+        /// permanently within a hair of its target — the car is braking hard,
+        /// but the gap to target says nothing about it. Only the applied
+        /// delta reports that braking.</summary>
+        public float AppliedAccel { get; private set; }
 
         /// <summary>Hard-set speed (red-light waits etc.).</summary>
         protected void HoldStopped()
         {
             Speed = 0f;
+            AppliedAccel = 0f;
         }
 
         // ── Placement ───────────────────────────────────────────────────
