@@ -68,7 +68,7 @@ namespace Delphi.Session
             if (track == null) track = FindFirstObjectByType<Track>();
             if (overviewCamera == null)
                 foreach (var c in Camera.allCameras)
-                    if (c.name == "Overview Camera") overviewCamera = c;
+                    if (c.name == "Track Overview Camera") overviewCamera = c;
 
             if (car == null || track == null)
             {

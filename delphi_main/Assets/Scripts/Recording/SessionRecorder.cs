@@ -58,6 +58,61 @@ namespace Delphi
                  "come out upside-down.")]
         public bool flipVideoVertically = true;
 
+        /// <summary>Which feeds get written to disk, one flag per FrameChannel.
+        ///
+        /// SEPARATE FROM DelphiManager'S CHANNEL TOGGLES ON PURPOSE. Those
+        /// decide whether a feed is CAPTURED at all — turning one off blinds
+        /// the dashboard too. These decide only whether a captured feed is
+        /// RECORDED, so the researcher can watch a camera live while keeping it
+        /// out of the session's files, and can drop an expensive feed from disk
+        /// without losing sight of it.
+        ///
+        /// Sized off AllFrameChannels rather than a fixed count, so adding a
+        /// channel cannot silently leave it unrepresented — see
+        /// EnsureRecordFlags.</summary>
+        // Defaults to ALL ON. `new bool[n]` would be all-false, i.e. a recorder
+        // that silently writes nothing — the worst possible default for the
+        // component whose entire job is not losing data.
+        [SerializeField]
+        private bool[] recordFeed = AllOn();
+
+        private static bool[] AllOn()
+        {
+            var a = new bool[DelphiManager.AllFrameChannels.Length];
+            for (int i = 0; i < a.Length; i++) a[i] = true;
+            return a;
+        }
+
+        /// <summary>Grows the flag array when a FrameChannel is added, defaulting
+        /// new channels to ON so a new feed is never silently unrecorded.</summary>
+        private void EnsureRecordFlags()
+        {
+            int n = DelphiManager.AllFrameChannels.Length;
+            if (recordFeed != null && recordFeed.Length == n) return;
+
+            var grown = new bool[n];
+            for (int i = 0; i < n; i++)
+                grown[i] = recordFeed == null || i >= recordFeed.Length || recordFeed[i];
+            recordFeed = grown;
+        }
+
+        /// <summary>Whether this channel is set to be written to disk.</summary>
+        public bool IsFeedRecorded(FrameChannel ch)
+        {
+            EnsureRecordFlags();
+            int i = System.Array.IndexOf(DelphiManager.AllFrameChannels, ch);
+            return i >= 0 && i < recordFeed.Length && recordFeed[i];
+        }
+
+        public void SetFeedRecorded(FrameChannel ch, bool on)
+        {
+            EnsureRecordFlags();
+            int i = System.Array.IndexOf(DelphiManager.AllFrameChannels, ch);
+            if (i >= 0) recordFeed[i] = on;
+        }
+
+        private void OnValidate() => EnsureRecordFlags();
+
         public bool IsRecording { get; private set; }
         public float ElapsedSeconds => IsRecording ? (float)(DelphiClock.Now - _clockStart) : 0f;
         public string LastSessionPath { get; private set; }
@@ -170,8 +225,14 @@ namespace Delphi
 
             // One feed per frame channel that is actually delivering pixels.
             _feeds.Clear();
+            EnsureRecordFlags();
             foreach (var ch in DelphiManager.AllFrameChannels)
             {
+                // Deselected feeds cost nothing here: no RenderTexture, no
+                // readback, no ffmpeg process. This is the toggle that
+                // actually removes the per-feed recording load.
+                if (!IsFeedRecorded(ch)) continue;
+
                 var tex = manager.GetFrame(ch);
                 // WebCamTexture reports 16×16 until its first real frame.
                 if (tex == null || tex.width <= 32) continue;

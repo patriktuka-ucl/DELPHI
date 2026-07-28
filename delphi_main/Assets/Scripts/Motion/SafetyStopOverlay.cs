@@ -8,12 +8,18 @@ namespace Delphi.Motion
     /// SessionController.CurrentPhase == Phase.EmergencyStop.
     ///
     /// Owns none of the visual content on purpose — point overlayRoot at a
-    /// world-space Canvas authored directly in the scene (parented to
-    /// "Person View", the participant's viewpoint camera — there's no XR
-    /// headset in this project, so that plain desktop Camera parented to
-    /// CarDriver is what the participant actually looks at) so you can add
+    /// world-space Canvas authored directly in the scene so you can add
     /// images, extra text, or restyle it freely in the Editor. This script
     /// just flips it on/off.
+    ///
+    /// WHERE TO PARENT IT: "[VR] Seat Reference", the driver's eye point
+    /// fixed to the car (VrRig creates it above "Person View"). NOT the
+    /// camera — in the headset that welds the overlay to the participant's
+    /// face, which is both unreadable and nauseating, and this thing shows
+    /// up precisely when they are already having a bad time. Sit it around
+    /// 1.5–2 m ahead so it converges comfortably in stereo. Without a
+    /// headset "Person View" and the seat reference are the same place, so
+    /// the desktop setup is unaffected either way.
     /// </summary>
     public class SafetyStopOverlay : MonoBehaviour
     {

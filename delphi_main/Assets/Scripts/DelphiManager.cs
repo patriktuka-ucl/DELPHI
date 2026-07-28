@@ -35,9 +35,11 @@ namespace Delphi
     public enum FrameChannel
     {
         Webcam,           // participant-facing physical camera (WebcamSensor)
-        SceneOverview,    // bird's-eye scene camera (CameraFeedSensor)
+        TrackOverview,    // bird's-eye scene camera (CameraFeedSensor)
         PlayerView,       // what the participant sees (CameraFeedSensor)
-        Panorama360       // 360° equirect of the environment (Panorama360Sensor)
+        Panorama360,      // 360° equirect of the environment (Panorama360Sensor)
+        EyeCameras        // Varjo XR-3 infrared eye cameras, side by side
+                          // (VarjoEyeCameraSensor)
         // Append only — the value is written into recorded session metadata.
     }
 
@@ -147,9 +149,15 @@ namespace Delphi
         [FormerlySerializedAs("camera")]
         [SerializeField] private FrameSensor webcam;
         [SerializeField] private float webcamFps = 30f;
-        [SerializeField] private bool sceneOverviewOn = true;
-        [SerializeField] private FrameSensor sceneOverview;
-        [SerializeField] private float sceneOverviewFps = 30f;
+        // FormerlySerializedAs, or renaming these fields silently empties the
+        // slot in every scene that already had a sensor plugged into it — and
+        // an empty feed slot looks exactly like a feed that stopped working.
+        [FormerlySerializedAs("sceneOverviewOn")]
+        [SerializeField] private bool trackOverviewOn = true;
+        [FormerlySerializedAs("sceneOverview")]
+        [SerializeField] private FrameSensor trackOverview;
+        [FormerlySerializedAs("sceneOverviewFps")]
+        [SerializeField] private float trackOverviewFps = 30f;
         [SerializeField] private bool playerViewOn = true;
         [SerializeField] private FrameSensor playerView;
         [SerializeField] private float playerViewFps = 30f;
@@ -158,6 +166,14 @@ namespace Delphi
         [Tooltip("Six cube faces are rendered per frame here, so this is the " +
                  "most expensive feed — keep it well below the others.")]
         [SerializeField] private float panorama360Fps = 10f;
+        [SerializeField] private bool eyeCamerasOn = true;
+        [SerializeField] private FrameSensor eyeCameras;
+        [Tooltip("Varjo delivers the eye cameras at 200 Hz, which is far more " +
+                 "than any recording needs — two 640x480 frames that often is " +
+                 "~123 MB/s. This is the rate frames are actually composed " +
+                 "at; everything in between is dropped inside the sensor for " +
+                 "the cost of a flag check, so raising this costs real work.")]
+        [SerializeField] private float eyeCamerasFps = 15f;
 
         // The acquisition engine — all scalar sampling and csv recording
         // happen on ITS dedicated thread with its own DelphiClock schedule,
@@ -195,8 +211,8 @@ namespace Delphi
 
         public static readonly FrameChannel[] AllFrameChannels =
         {
-            FrameChannel.Webcam, FrameChannel.SceneOverview, FrameChannel.PlayerView,
-            FrameChannel.Panorama360
+            FrameChannel.Webcam, FrameChannel.TrackOverview, FrameChannel.PlayerView,
+            FrameChannel.Panorama360, FrameChannel.EyeCameras
         };
 
         // ── Playback override ───────────────────────────────────────────
@@ -286,9 +302,10 @@ namespace Delphi
         public static (string label, string unit) FrameMeta(FrameChannel ch) => ch switch
         {
             FrameChannel.Webcam        => ("Webcam", ""),
-            FrameChannel.SceneOverview => ("Scene overview", ""),
+            FrameChannel.TrackOverview => ("Track overview", ""),
             FrameChannel.PlayerView    => ("Player view", ""),
             FrameChannel.Panorama360   => ("360° environment", ""),
+            FrameChannel.EyeCameras    => ("Eye cameras", ""),
             _                          => (ch.ToString(), "")
         };
 
@@ -470,9 +487,10 @@ namespace Delphi
         public float FrameRate(FrameChannel ch) => Mathf.Max(0.1f, ch switch
         {
             FrameChannel.Webcam        => webcamFps,
-            FrameChannel.SceneOverview => sceneOverviewFps,
+            FrameChannel.TrackOverview => trackOverviewFps,
             FrameChannel.PlayerView    => playerViewFps,
             FrameChannel.Panorama360   => panorama360Fps,
+            FrameChannel.EyeCameras    => eyeCamerasFps,
             _                          => 30f
         });
 
@@ -539,18 +557,20 @@ namespace Delphi
         private FrameSensor FrameSlot(FrameChannel ch) => ch switch
         {
             FrameChannel.Webcam        => webcam,
-            FrameChannel.SceneOverview => sceneOverview,
+            FrameChannel.TrackOverview => trackOverview,
             FrameChannel.PlayerView    => playerView,
             FrameChannel.Panorama360   => panorama360,
+            FrameChannel.EyeCameras    => eyeCameras,
             _                          => null
         };
 
         private bool IsOn(FrameChannel ch) => ch switch
         {
             FrameChannel.Webcam        => webcamOn,
-            FrameChannel.SceneOverview => sceneOverviewOn,
+            FrameChannel.TrackOverview => trackOverviewOn,
             FrameChannel.PlayerView    => playerViewOn,
             FrameChannel.Panorama360   => panorama360On,
+            FrameChannel.EyeCameras    => eyeCamerasOn,
             _                          => true
         };
     }

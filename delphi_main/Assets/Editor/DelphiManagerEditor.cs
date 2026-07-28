@@ -89,9 +89,10 @@ namespace Delphi.EditorTools
         private static readonly Row[] FrameRows =
         {
             new Row("Webcam",         "webcamOn",        "webcam",        "webcamFps"),
-            new Row("Scene overview", "sceneOverviewOn", "sceneOverview", "sceneOverviewFps"),
+            new Row("Track overview", "trackOverviewOn", "trackOverview", "trackOverviewFps"),
             new Row("Player view",    "playerViewOn",    "playerView",    "playerViewFps"),
             new Row("360° environment", "panorama360On", "panorama360",  "panorama360Fps"),
+            new Row("Eye cameras",    "eyeCamerasOn",    "eyeCameras",    "eyeCamerasFps"),
         };
 
         private static readonly Dictionary<string, Channel> ChannelByProp = new()
@@ -108,9 +109,10 @@ namespace Delphi.EditorTools
         private static readonly Dictionary<string, FrameChannel> FrameChannelByProp = new()
         {
             { "webcam", FrameChannel.Webcam },
-            { "sceneOverview", FrameChannel.SceneOverview },
+            { "trackOverview", FrameChannel.TrackOverview },
             { "playerView", FrameChannel.PlayerView },
             { "panorama360", FrameChannel.Panorama360 },
+            { "eyeCameras", FrameChannel.EyeCameras },
         };
 
         private static readonly Color OnChip     = new Color(0.20f, 0.85f, 0.35f);

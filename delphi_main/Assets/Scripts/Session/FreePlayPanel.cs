@@ -36,33 +36,86 @@ namespace Delphi.Session
         public Camera participantCamera;
 
         [Header("Placement (local to the anchor, world units = metres)")]
+        [Tooltip("Desktop placement. In VR the panel uses the VR placement " +
+                 "below instead, because it has to be within arm's reach.")]
         public Vector3 localPosition = new Vector3(0f, -0.15f, 0.5f);
         public Vector3 localEulerAngles = Vector3.zero;
         public Vector2 sizeMeters = new Vector2(0.5f, 0.44f);
 
+        [Header("VR — physical touch")]
+        [Tooltip("In VR, replace the mouse-driven uGUI sliders with Ultraleap " +
+                 "sliders the participant pushes with a finger. Needs hand " +
+                 "tracking and a Physical Hands Manager; falls back to the " +
+                 "uGUI sliders automatically when either is missing, so the " +
+                 "desktop workflow is untouched.")]
+        public bool usePhysicalSlidersInVr = true;
+        [Tooltip("Ultraleap's 'Physical Hands Slider' prefab.")]
+        public GameObject physicalSliderPrefab;
+        [Tooltip("Where the panel sits in VR, relative to the DRIVER'S SEAT " +
+                 "(not the head). Close enough to touch without leaning: " +
+                 "roughly lap height and a comfortable forearm away.")]
+        public Vector3 vrLocalPosition = new Vector3(0f, -0.34f, 0.42f);
+        [Tooltip("Tilted back toward the participant so it faces the eyes " +
+                 "while sitting low enough to reach — like a car centre " +
+                 "console rather than a wall.")]
+        public Vector3 vrLocalEulerAngles = new Vector3(38f, 0f, 0f);
+        [Tooltip("How far each physical slider travels, in metres.")]
+        public float sliderTravelMeters = 0.16f;
+        [Tooltip("Vertical gap between physical sliders, in metres. Too tight " +
+                 "and a finger reaching for one nudges its neighbour.")]
+        public float sliderSpacingMeters = 0.055f;
+
         private const int PixelWidth = 640;
-        private const int PixelHeight = 560;
+        private const int PixelHeight = 660;
 
         private static readonly string[] ParamLabels =
-            { "Acceleration", "Braking", "Follow distance", "Cornering speed", "Takeover chance", "Speed vs. limit" };
+            { "Acceleration", "Braking", "Follow distance", "Cornering speed" };
         private static readonly string[] ParamKeys =
-            { "accelerationJerk", "brakingJerk", "followDistance", "corneringSpeed", "takeoverProbability", "speedBelowLimit" };
+            { "accelerationJerk", "brakingJerk", "followDistance", "corneringSpeed" };
 
         private Font _font;
         private GameObject _panelRoot; // toggled on/off with Phase.FreePlay; this component's own GameObject stays active so Update() keeps polling
-        private readonly Slider[] _sliders = new Slider[6];
-        private readonly Text[] _values = new Text[6];
+        private readonly Text[] _values = new Text[ParamKeys.Length];
+
+        private bool _mountedToSeat;
+        private bool _physical;   // seat-mounted VR layout in use
+        private readonly VR.VrTouchSlider[] _touchSliders = new VR.VrTouchSlider[ParamKeys.Length];
 
         private void Awake()
         {
             if (session == null) session = FindFirstObjectByType<SessionController>();
             if (participantCamera == null)
             {
+                // Name first, Display 0 only as a fallback: the researcher's
+                // "Track Overview Camera" also sits on Display 0 at the same depth,
+                // so "first camera on Display 0" is a coin toss that lands on
+                // a camera 150 m above the track about half the time.
                 foreach (var cam in Camera.allCameras)
-                    if (cam.targetDisplay == 0) { participantCamera = cam; break; }
+                    if (cam.name == "Person View") { participantCamera = cam; break; }
+                if (participantCamera == null)
+                    foreach (var cam in Camera.allCameras)
+                        if (cam.targetDisplay == 0) { participantCamera = cam; break; }
             }
 
-            var mount = anchorOverride != null ? anchorOverride : participantCamera != null ? participantCamera.transform : null;
+            // ANCHOR TO THE SEAT IN VR, NEVER THE HEAD.
+            //
+            // The desktop panel hangs off the camera, which is fine for a
+            // thing you click with a mouse. It is useless for a thing you
+            // TOUCH: a panel welded to the head retreats exactly as fast as
+            // the finger approaches, so the slider can never be reached. It is
+            // also the arrangement VrRig's notes warn about on comfort
+            // grounds. The seat reference is fixed to the car, so it moves
+            // with the drive and holds still relative to the hands.
+            var seat = VR.VrRig.Instance != null && VR.VrRig.Instance.IsActive
+                ? VR.VrRig.Instance.SeatReference
+                : null;
+
+            var mount = anchorOverride != null ? anchorOverride
+                      : seat != null ? seat
+                      : participantCamera != null ? participantCamera.transform : null;
+
+            _mountedToSeat = anchorOverride == null && seat != null;
+
             if (mount == null)
             {
                 Debug.LogWarning("[FreePlayPanel] No participant camera (Target Display 0) found and no " +
@@ -90,21 +143,37 @@ namespace Delphi.Session
 
             var p = session.carDriver.parameters;
             float[] v = { p.accelerationJerk, p.brakingJerk, p.followDistance,
-                          p.corneringSpeed, p.takeoverProbability, p.speedBelowLimit };
-            for (int i = 0; i < 6; i++)
+                          p.corneringSpeed };
+
+            for (int i = 0; i < ParamKeys.Length; i++)
             {
-                _sliders[i].SetValueWithoutNotify(v[i]);
-                _values[i].text = v[i].ToString("F2");
+                // The slider owns its own readout, so this only has to keep
+                // it in step with the car when the participant is NOT touching
+                // it — notify:false so echoing a value back cannot loop into
+                // SetFreePlayParameter and fight the finger.
+                var ts = _touchSliders[i];
+                if (ts != null && !ts.IsEngaged)
+                    ts.SetValue(v[i], notify: false);
             }
         }
 
         // ── UI construction ─────────────────────────────────────────────
         private void BuildUI(Transform mount)
         {
+            _physical = usePhysicalSlidersInVr && _mountedToSeat && physicalSliderPrefab != null;
+
+            // A plain holder at identity scale, so ONE SetActive hides the
+            // whole control surface. The canvas cannot serve as that root: it
+            // carries a non-uniform metres-per-pixel scale, and parenting rigid
+            // bodies under it would scale their colliders differently on each
+            // axis. Physical sliders are siblings of the canvas, not children.
+            var holder = new GameObject("FreePlay Panel");
+            holder.transform.SetParent(mount, false);
+
             var canvasGO = new GameObject("FreePlay Panel (World Space)", typeof(Canvas), typeof(GraphicRaycaster));
-            canvasGO.transform.SetParent(mount, false);
-            canvasGO.transform.localPosition = localPosition;
-            canvasGO.transform.localEulerAngles = localEulerAngles;
+            canvasGO.transform.SetParent(holder.transform, false);
+            canvasGO.transform.localPosition = _physical ? vrLocalPosition : localPosition;
+            canvasGO.transform.localEulerAngles = _physical ? vrLocalEulerAngles : localEulerAngles;
 
             var canvas = canvasGO.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.WorldSpace;
@@ -115,61 +184,60 @@ namespace Delphi.Session
             float scaleX = sizeMeters.x / PixelWidth, scaleY = sizeMeters.y / PixelHeight;
             canvasGO.transform.localScale = new Vector3(scaleX, scaleY, (scaleX + scaleY) * 0.5f);
 
-            var bg = NewImage(canvasGO.transform, new Color(0.05f, 0.06f, 0.09f, 0.88f));
+            // Panel plate. Rounded via Unity's own UISprite so it reads as a
+            // designed surface rather than a raw quad — the same trick the
+            // slider uses, and the reason none of this needs imported art.
+            var bg = NewImage(canvasGO.transform, new Color(0.055f, 0.065f, 0.085f, 0.94f));
             Stretch(bg.rectTransform);
+            var bgSprite = Resources.GetBuiltinResource<Sprite>("UI/Skin/UISprite.psd");
+            if (bgSprite != null) { bg.sprite = bgSprite; bg.type = Image.Type.Sliced; }
 
-            var title = Txt(canvasGO.transform, "Adjust the driving style", 26,
-                new Color(0.90f, 0.93f, 0.99f), new Vector2(24, -18), new Vector2(PixelWidth - 48, 34));
+            // Accent rule under the title — the one bit of colour that tells
+            // you which surface you are looking at without reading it.
+            var rule = NewImage(canvasGO.transform, new Color(0.24f, 0.83f, 0.76f, 0.85f));
+            rule.rectTransform.anchoredPosition = new Vector2(28, -74);
+            rule.rectTransform.sizeDelta = new Vector2(PixelWidth - 56, 3);
+
+            var title = Txt(canvasGO.transform, "DRIVING STYLE", 26,
+                new Color(0.92f, 0.95f, 1f), new Vector2(28, -22), new Vector2(PixelWidth - 56, 36));
             title.fontStyle = FontStyle.Bold;
 
-            for (int i = 0; i < 6; i++)
+            const float RowH = 132f;
+            const float RowTop = -100f;
+
+            for (int i = 0; i < ParamKeys.Length; i++)
             {
-                float y = -72 - i * 80;
-                Txt(canvasGO.transform, ParamLabels[i], 20, new Color(0.82f, 0.86f, 0.94f),
-                    new Vector2(24, y), new Vector2(PixelWidth - 48, 28));
-
-                _sliders[i] = BuildSlider(canvasGO.transform, new Vector2(24, y - 34), new Vector2(PixelWidth - 120, 30));
+                float y = RowTop - i * RowH;
                 int idx = i; // capture per-iteration, not the loop variable
-                _sliders[i].onValueChanged.AddListener(val => session?.SetFreePlayParameter(ParamKeys[idx], val));
 
-                _values[i] = Txt(canvasGO.transform, "0.50", 20, new Color(0.82f, 0.86f, 0.94f),
-                    new Vector2(PixelWidth - 86, y - 32), new Vector2(62, 28));
+                Txt(canvasGO.transform, ParamLabels[i].ToUpperInvariant(), 19,
+                    new Color(0.74f, 0.79f, 0.88f), new Vector2(28, y), new Vector2(PixelWidth - 160, 26));
+
+                _values[i] = Txt(canvasGO.transform, "0.50", 22,
+                    new Color(0.24f, 0.83f, 0.76f), new Vector2(PixelWidth - 118, y - 2),
+                    new Vector2(90, 28));
+                _values[i].alignment = TextAnchor.UpperRight;
+
+                // The interactive row is deliberately TALLER than the visible
+                // track. Hand tracking has centimetres of jitter, and a target
+                // only as tall as an 14 px bar would be missed constantly.
+                var rowGO = new GameObject($"Row_{ParamLabels[i]}", typeof(RectTransform));
+                rowGO.transform.SetParent(canvasGO.transform, false);
+                var row = rowGO.GetComponent<RectTransform>();
+                row.anchorMin = row.anchorMax = new Vector2(0, 1);
+                row.pivot = new Vector2(0, 1);
+                row.anchoredPosition = new Vector2(28, y - 38);
+                row.sizeDelta = new Vector2(PixelWidth - 56, 88);
+
+                var slider = rowGO.AddComponent<VR.VrTouchSlider>();
+                slider.Build(row, _font);
+                slider.BindValueLabel(_values[i]);
+                slider.onValueChanged.AddListener(val => session?.SetFreePlayParameter(ParamKeys[idx], val));
+                _touchSliders[i] = slider;
             }
 
-            _panelRoot = canvasGO;
-            _panelRoot.SetActive(false); // hidden until Phase.FreePlay
-        }
-
-        private Slider BuildSlider(Transform parent, Vector2 pos, Vector2 size)
-        {
-            var go = new GameObject("Slider", typeof(RectTransform), typeof(Slider));
-            go.transform.SetParent(parent, false);
-            var rt = go.GetComponent<RectTransform>();
-            rt.anchorMin = rt.anchorMax = new Vector2(0, 1); rt.pivot = new Vector2(0, 1);
-            rt.anchoredPosition = pos; rt.sizeDelta = size;
-
-            var bg = NewImage(go.transform, new Color(0.20f, 0.22f, 0.28f, 1f));
-            Stretch(bg.rectTransform);
-
-            var fillArea = new GameObject("Fill Area", typeof(RectTransform));
-            fillArea.transform.SetParent(go.transform, false);
-            var fart = fillArea.GetComponent<RectTransform>();
-            fart.anchorMin = Vector2.zero; fart.anchorMax = Vector2.one; fart.offsetMin = fart.offsetMax = Vector2.zero;
-            var fill = NewImage(fillArea.transform, new Color(0.30f, 0.75f, 0.55f, 1f));
-            var frt = fill.rectTransform;
-            frt.anchorMin = Vector2.zero; frt.anchorMax = Vector2.one; frt.offsetMin = frt.offsetMax = Vector2.zero;
-
-            var handleArea = new GameObject("Handle Area", typeof(RectTransform));
-            handleArea.transform.SetParent(go.transform, false);
-            var hart = handleArea.GetComponent<RectTransform>();
-            hart.anchorMin = Vector2.zero; hart.anchorMax = Vector2.one; hart.offsetMin = new Vector2(16, 0); hart.offsetMax = new Vector2(-16, 0);
-            var handle = NewImage(handleArea.transform, Color.white);
-            var hrt = handle.rectTransform; hrt.sizeDelta = new Vector2(32, 0);
-
-            var s = go.GetComponent<Slider>();
-            s.fillRect = frt; s.handleRect = hrt; s.targetGraphic = handle;
-            s.minValue = 0f; s.maxValue = 1f; s.direction = Slider.Direction.LeftToRight;
-            return s;
+            _panelRoot = holder;
+            _panelRoot.SetActive(false); // hidden until Phase.FreePlay — canvas AND sliders
         }
 
         private Image NewImage(Transform parent, Color c)

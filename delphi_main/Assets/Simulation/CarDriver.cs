@@ -7,7 +7,7 @@ namespace Delphi.Simulation
     /// The driving-style parameters, normalised 0..1. Convention across EVERY
     /// axis: 0 = gentle, 1 = assertive — the optimiser sees a uniform direction.
     ///
-    /// EVERYTHING the car does is DERIVED FROM THESE SIX AXES AND NOTHING ELSE —
+    /// EVERYTHING the car does is DERIVED FROM THESE FOUR AXES AND NOTHING ELSE —
     /// no separate physical ceilings, no auxiliary "how early to brake"
     /// constants. Each axis maps, via ITS OWN Min/Max range below, directly to
     /// the physical quantity that governs its effect. accelerationJerk/
@@ -19,10 +19,28 @@ namespace Delphi.Simulation
     /// All mapped values are computed PROPERTIES read fresh every frame — never
     /// cached — so dragging any slider mid-Play changes behaviour immediately.
     ///
-    /// followDistance and takeoverProbability are part of the thesis parameter
-    /// set but currently INERT — they need other traffic to act on, and the
-    /// traffic system is deliberately parked while the core drive loop is being
-    /// validated step by step.
+    /// THE FOUR AXES ARE THE WHOLE MODEL:
+    ///
+    ///   accelerationJerk — m/s² used to speed UP, whatever the target is.
+    ///   brakingJerk      — m/s² used to slow DOWN, and the rate the red-light
+    ///                      and corner approach curves are derived from, so
+    ///                      the car decelerates at exactly the rate its own
+    ///                      approach maths assumed.
+    ///   followDistance   — time headway to a lead vehicle.
+    ///   corneringSpeed   — km/h cut from cruise for a tight curve, i.e. the
+    ///                      corner's own speed limit.
+    ///
+    /// Target speed is chosen from those, and the car is then MOVED TOWARD it
+    /// at the accel or brake magnitude — never snapped. Wanting 35 km/h in a
+    /// corner while doing 50 does not teleport the speedometer; brakingJerk
+    /// decides how long the change takes and is therefore what the change
+    /// FEELS like. That easing is the entire behavioural signal this study
+    /// manipulates, so nothing may ever set speed directly.
+    ///
+    /// followDistance is currently INERT — it needs other traffic to act on,
+    /// and the traffic system is parked while the core drive loop is validated.
+    /// It remains a real axis: the optimizer still searches it and it takes
+    /// effect the moment traffic returns.
     /// </summary>
     [System.Serializable]
     public class DrivingParameters
@@ -38,18 +56,12 @@ namespace Delphi.Simulation
         public bool followDistanceOn      = true;
         [Tooltip("Off = no curvature slowdown; corners taken at cruise speed.")]
         public bool corneringSpeedOn      = true;
-        [Tooltip("Inert until the takeover system returns; kept for symmetry.")]
-        public bool takeoverProbabilityOn = true;
-        [Tooltip("Off = cruise exactly at the posted limit (zero margin).")]
-        public bool speedBelowLimitOn     = true;
 
         [Header("Values (0 = gentle, 1 = assertive)")]
         [Range(0f, 1f)] public float accelerationJerk    = 0.5f;
         [Range(0f, 1f)] public float brakingJerk         = 0.5f;
         [Range(0f, 1f)] public float followDistance      = 0.5f;
         [Range(0f, 1f)] public float corneringSpeed      = 0.5f;
-        [Range(0f, 1f)] public float takeoverProbability = 0.5f;
-        [Range(0f, 1f)] public float speedBelowLimit     = 0.5f;
 
         [Header("Acceleration magnitude range (m/s^2)")]
         [Tooltip("The CONSTANT acceleration used for the whole speed-up, not a " +
@@ -84,13 +96,6 @@ namespace Delphi.Simulation
         public float cornerSlowdownMinKmh = 5f;   // assertive: barely slows for curves
         public float cornerSlowdownMaxKmh = 30f;  // gentle: slows a lot for curves
 
-        [Header("Speed below limit range (km/h under the posted limit)")]
-        [Tooltip("Gentle = a big margin below the limit, so this axis is " +
-                 "inverted when mapped: 0 → belowLimitMaxKmh under, 1 → at " +
-                 "the limit.")]
-        public float belowLimitMinKmh = 0f;   // assertive: at the limit
-        public float belowLimitMaxKmh = 15f;  // gentle: well under
-
         // "Off" sentinel: an acceleration/deceleration magnitude high enough
         // that MoveTowards reaches any plausible target speed within one frame
         // — i.e. instant, unstyled snapping.
@@ -104,18 +109,16 @@ namespace Delphi.Simulation
         /// 0=gentle → cornerSlowdownMaxKmh (cuts a lot), 1=assertive →
         /// cornerSlowdownMinKmh (barely cuts).</summary>
         public float CornerSlowdownKmh => Mathf.Lerp(cornerSlowdownMaxKmh, cornerSlowdownMinKmh, corneringSpeed); // inverted
-        public float SpeedBelowLimitKmh => speedBelowLimitOn ? Mathf.Lerp(belowLimitMaxKmh, belowLimitMinKmh, speedBelowLimit) : 0f; // inverted
-        public float TakeoverProbability => takeoverProbability;
     }
 
     /// <summary>
     /// The ego AV. Drives the Track in route space (see RouteVehicle): direct
     /// speed control at each style's own CONSTANT accel/decel magnitude,
     /// continuous curvature-based corner slowdown (the geometry IS the corner —
-    /// no corner events), and cruise speed derived from the local posted limit
-    /// minus the speedBelowLimit parameter. Every behaviour is derived from the
-    /// six DrivingParameters axes and nothing else — no separate physical
-    /// ceilings or auxiliary constants live on this class.
+    /// no corner events), and cruise speed taken straight from the local posted
+    /// limit. Every behaviour is derived from the four DrivingParameters axes
+    /// and nothing else — no separate physical ceilings or auxiliary constants
+    /// live on this class.
     ///
     /// RED LIGHTS — the stop-line guarantee. Wherever the RedLight marker sits
     /// is treated like the line painted on the pavement:
@@ -405,7 +408,7 @@ namespace Delphi.Simulation
 
             // ── Target speed this frame, then move toward it at THIS
             // style's own constant accel/decel magnitude ─────────────
-            float targetSpeed = ComputeTargetSpeed();   // also sets Limiter and _settleSpeed
+            float targetSpeed = ComputeTargetSpeed(dt);  // also sets Limiter and _settleSpeed
             StepSpeed(targetSpeed, parameters.AccelJerk, parameters.BrakeJerk, dt);
             PublishDrivingState(targetSpeed);
 
@@ -513,10 +516,13 @@ namespace Delphi.Simulation
         // `target` claims it, so the last claim standing is by construction
         // the binding constraint. That readout is the whole answer to "why
         // won't the car go faster than X".
-        private float ComputeTargetSpeed()
+        private float ComputeTargetSpeed(float dt)
         {
-            // Cruise: posted limit minus the style-dependent margin.
-            float cruiseKmh = Mathf.Max(5f, track.SpeedLimitAt(S) - parameters.SpeedBelowLimitKmh);
+            // Cruise: the posted limit. There is no style margin any more —
+            // "how far under the limit to sit" was removed as an axis, so the
+            // car drives the road's limit and the only things that pull it
+            // below are a corner, a red light or a lead vehicle.
+            float cruiseKmh = Mathf.Max(5f, track.SpeedLimitAt(S));
             float target = cruiseKmh / 3.6f;
             Limiter = SpeedLimiter.Cruise;
             _settleSpeed = target;
@@ -561,7 +567,19 @@ namespace Delphi.Simulation
             // overshoot guarantee).
             if (track.TryNextStop(_servedLights, out float stopS, out _))
             {
-                float distanceRemaining = Mathf.Max(0f, stopS - S);
+                // ONE FRAME OF LOOK-AHEAD, and it is not a fudge factor.
+                //
+                // The curve answers "how fast may I be going, d metres out".
+                // Evaluated at where the car is NOW, the speed it authorises
+                // is already too high by the time the car has travelled this
+                // frame's Speed*dt — so the car tracks a permanently stale
+                // curve and arrives at the line still carrying roughly
+                // BrakeJerk*dt of speed. That residual is what the stop-line
+                // clamp below then deletes in a single frame, and that delete
+                // is the snap. Aiming the curve at next frame's position
+                // removes the residual at its source, so the car reaches the
+                // line already at zero and the clamp becomes a no-op backstop.
+                float distanceRemaining = Mathf.Max(0f, stopS - (S + Speed * dt));
                 float approachLimit = Mathf.Sqrt(2f * parameters.BrakeJerk * distanceRemaining);
                 if (approachLimit < target)
                 {
@@ -577,7 +595,7 @@ namespace Delphi.Simulation
             // instead — only active once RequestPark() has been called.
             if (_headingToPark && _targetPark != null)
             {
-                float distanceRemaining = Mathf.Max(0f, _targetPark.S - S);
+                float distanceRemaining = Mathf.Max(0f, _targetPark.S - (S + Speed * dt));
                 float approachLimit = Mathf.Sqrt(2f * parameters.BrakeJerk * distanceRemaining);
                 if (approachLimit < target)
                 {

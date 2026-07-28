@@ -279,9 +279,9 @@ namespace Delphi
         private Image _optDot;
         private Text _optLabel, _iterTxt, _hvTxt, _trackPosTxt;
         private static readonly string[] ParamLabels =
-            { "Accel jerk", "Brake jerk", "Follow dist", "Corner spd", "Takeover", "Speed<lim" };
-        private Slider[] _paramBars = new Slider[6];
-        private Text[] _paramVals = new Text[6];
+            { "Acceleration", "Braking", "Follow dist", "Corner spd" };
+        private Slider[] _paramBars = new Slider[ParamLabels.Length];
+        private Text[] _paramVals = new Text[ParamLabels.Length];
 
         private void RefreshTrialCard()
         {
@@ -313,8 +313,8 @@ namespace Delphi
             {
                 var p = session.carDriver.parameters;
                 float[] v = { p.accelerationJerk, p.brakingJerk, p.followDistance,
-                              p.corneringSpeed, p.takeoverProbability, p.speedBelowLimit };
-                for (int i = 0; i < 6; i++)
+                              p.corneringSpeed };
+                for (int i = 0; i < ParamLabels.Length; i++)
                 {
                     _paramBars[i].SetValueWithoutNotify(v[i]);
                     _paramVals[i].text = v[i].ToString("F2");
@@ -366,12 +366,26 @@ namespace Delphi
         private readonly List<Panel> _panels = new();
         private int _cellW = 210, _cellH = 54;
 
+        // Frame cells are taller than scalar cells: a waveform reads fine in a
+        // 54 px strip, a camera feed does not. The video height is set here
+        // rather than from _cellH so the two can diverge without disturbing
+        // the scalar grid's row maths.
+        private const int FrameCellH = 132;
+        // How wide a single feed may get before it would crowd its neighbour.
+        // Generous enough for a 2:1 panorama at full height; an 8:3 eye pair
+        // hits it and scales down proportionally.
+        private float _maxFrameW => _cellW * 1.6f;
+
         // Grid layout — shared by BuildSensorGrid and RelayoutGrid so the live
         // reflow lands cells in exactly the same slots the initial build uses.
         private const int GridCols = 4;
         private const float GridX0 = 496, GridY0 = -60, GridColGap = 14, GridRowGap = 12;
         private const float GridTitleH = 18, GridValH = 16;
         private float GridRowH => _cellH + GridTitleH + GridValH;
+        /// <summary>Frame rows are taller than scalar rows, so the frame box
+        /// and its packing must size off this rather than GridRowH — otherwise
+        /// the box is drawn for short rows and the feeds overflow it.</summary>
+        private float FrameRowH => FrameCellH + GridTitleH + GridValH;
         // Bit i = panel i is active. Recomputed each redraw; the grid only
         // reflows when this changes, so a steady set costs one long compare.
         private long _lastLayoutSig = -1;
@@ -435,9 +449,10 @@ namespace Delphi
                 if (p.cell.activeSelf != active) p.cell.SetActive(active);
                 if (!active) continue;
                 int col = idx % GridCols, row = idx / GridCols;
+                float rowPitch = (isFrame ? FrameRowH : GridRowH) + GridRowGap;
                 p.cellRt.anchoredPosition = new Vector2(
                     SectionContentX + col * (_cellW + GridColGap),
-                    SectionContentY - row * (GridRowH + GridRowGap));
+                    SectionContentY - row * rowPitch);
                 idx++;
             }
         }
@@ -475,7 +490,26 @@ namespace Delphi
                 if (tex != null && tex.width > 0)
                 {
                     p.image.texture = tex;
-                    p.image.rectTransform.sizeDelta = new Vector2(_cellW, _cellW * (float)tex.height / tex.width);
+
+                    // MATCH HEIGHT, DERIVE WIDTH FROM THE SOURCE ASPECT.
+                    //
+                    // Every feed gets the same height and keeps its own shape,
+                    // so a 16:9 player view, a 2:1 panorama and an 8:3
+                    // side-by-side eye pair all sit on one baseline at
+                    // genuinely comparable scale — which a common WIDTH does
+                    // not give you: it makes the wide feeds short and the tall
+                    // ones huge, and nothing lines up.
+                    //
+                    // Width is still capped, because an 8:3 pair at full cell
+                    // height would otherwise run into its neighbour. When the
+                    // cap bites, height comes back down with it so the aspect
+                    // ratio is never distorted — a stretched feed is the kind
+                    // of thing nobody notices until they measure something off
+                    // it months later.
+                    float aspect = (float)tex.width / Mathf.Max(1, tex.height); // w:h
+                    float h = FrameCellH, w = h * aspect;
+                    if (w > _maxFrameW) { w = _maxFrameW; h = w / Mathf.Max(aspect, 1e-4f); }
+                    p.image.rectTransform.sizeDelta = new Vector2(w, h);
                 }
                 p.value.text = manager.IsInPlayback ? "playback" : "live"; p.value.color = (Color)WaveColor;
             }
@@ -619,12 +653,105 @@ namespace Delphi
         {
             var kb = Keyboard.current; if (kb == null) return;
             if (_nameField != null && _nameField.isFocused) return;
-            if (player == null || !player.IsLoaded) return;
+
+            // SPACE does two different things, decided by whether a recording
+            // is loaded. That is not a clash: with a recording loaded the
+            // dashboard IS a playback transport and space is play/pause; with
+            // nothing loaded there is no transport to drive, so the key is
+            // free and space is the obvious "go".
+            if (player == null || !player.IsLoaded)
+            {
+                HandleOrderKeys(kb);
+                if (kb.spaceKey.wasPressedThisFrame) StartSessionFromKeyboard();
+
+                // Debug skip. Deliberately awkward — Ctrl held, and a key
+                // nowhere near the others — because skipping the meditation
+                // silently invalidates the next condition's baseline, and a
+                // one-key version would eventually get pressed by accident
+                // with a participant in the headset.
+                if (kb.backspaceKey.wasPressedThisFrame &&
+                    (kb.leftCtrlKey.isPressed || kb.rightCtrlKey.isPressed))
+                {
+                    session?.DebugSkipPhase();
+                    Log($"DEBUG SKIP requested (Ctrl+Backspace) during {session?.CurrentPhase}.");
+                }
+                return;
+            }
+
             if (kb.spaceKey.wasPressedThisFrame) player.TogglePlay();
             if (kb.leftArrowKey.wasPressedThisFrame) player.StepFrames(-1);
             if (kb.rightArrowKey.wasPressedThisFrame) player.StepFrames(1);
             if (kb.upArrowKey.wasPressedThisFrame) CycleSpeed(1);
             if (kb.downArrowKey.wasPressedThisFrame) CycleSpeed(-1);
+        }
+
+        /// <summary>Numpad 1–6 picks the counterbalancing order, exactly like
+        /// the six order buttons above the START button.
+        ///
+        /// NUMPAD ONLY, not the top-row digits: those are within easy reach of
+        /// a hand resting near the space bar, and this value is written into
+        /// every CSV as GroupID. Silently relabelling a whole session's data is
+        /// not a mistake worth making convenient.
+        ///
+        /// Refused once the session is running, for the same reason the
+        /// buttons disappear then: the order determines the segment plan, which
+        /// was already built at StartSession.</summary>
+        private void HandleOrderKeys(Keyboard kb)
+        {
+            if (session == null) return;
+
+            Key[] numpad =
+            {
+                Key.Numpad1, Key.Numpad2, Key.Numpad3,
+                Key.Numpad4, Key.Numpad5, Key.Numpad6
+            };
+
+            for (int i = 0; i < numpad.Length; i++)
+            {
+                if (!kb[numpad[i]].wasPressedThisFrame) continue;
+                int order = i + 1;
+
+                if (session.CurrentPhase != SessionController.Phase.Idle)
+                {
+                    Log($"Order {order} ignored — session already running ({session.CurrentPhase}).");
+                    return;
+                }
+
+                session.orderIndex = order;
+                Log($"Order {order} selected ({SessionController.DescribeOrder(order)}).");
+                return;
+            }
+        }
+
+        /// <summary>Spacebar equivalent of the START SESSION button.
+        ///
+        /// Goes through session.StartSession() exactly like the button does,
+        /// rather than reaching further in, so the two routes can never drift
+        /// apart. The button gets its guard for free by being hidden once the
+        /// session is under way; a key press has no such protection, so the
+        /// idle check below is what stops a stray space bar restarting a
+        /// session that is already running — with a participant in the
+        /// headset, that is not a recoverable mistake.
+        ///
+        /// Every outcome is logged, including the refusals, because from the
+        /// researcher's side a key that silently does nothing is
+        /// indistinguishable from one that is not wired up.</summary>
+        private void StartSessionFromKeyboard()
+        {
+            if (session == null)
+            {
+                Log("SPACE: no SessionController in the scene.");
+                return;
+            }
+
+            if (session.CurrentPhase != SessionController.Phase.Idle)
+            {
+                Log($"SPACE ignored — session already running ({session.CurrentPhase}).");
+                return;
+            }
+
+            if (session.StartSession()) Log("Session started (spacebar).");
+            else Log("SPACE: StartSession() refused — check the Session card above.");
         }
 
         // ════════════════════════════════════════════════════════════════
@@ -661,6 +788,14 @@ namespace Delphi
         // ════════════════════════════════════════════════════════════════
         //  UI CONSTRUCTION
         // ════════════════════════════════════════════════════════════════
+        /// <summary>The camera that clears the dashboard display, and the
+        /// canvas the dashboard is built on. Exposed for VrDashboardPanel,
+        /// which redirects both into a RenderTexture so the dashboard can be
+        /// shown on a floating panel inside the headset — a second monitor is
+        /// no use to somebody wearing an XR-3.</summary>
+        public Camera DashboardCamera { get; private set; }
+        public Canvas DashboardCanvas { get; private set; }
+
         private void BuildClearCamera()
         {
             var camGO = new GameObject("Dashboard Camera", typeof(Camera));
@@ -668,6 +803,7 @@ namespace Delphi
             var cam = camGO.GetComponent<Camera>();
             cam.clearFlags = CameraClearFlags.SolidColor; cam.backgroundColor = _bg;
             cam.cullingMask = 0; cam.targetDisplay = dashboardDisplay; cam.depth = 100;
+            DashboardCamera = cam;
         }
 
         private Transform _root;
@@ -681,6 +817,7 @@ namespace Delphi
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920, 1080); scaler.matchWidthOrHeight = 0.5f;
             canvasGO.GetComponent<RectTransform>().anchoredPosition = editorPreviewOffset;
+            DashboardCanvas = canvas;
             _root = canvasGO.transform;
 
             var bg = NewImage(_root, _bg); Stretch(bg.rectTransform);
@@ -794,7 +931,7 @@ namespace Delphi
 
             _trackPosTxt = Txt(host, "Track: —", 13, _accent, new Vector2(16, -76), new Vector2(422, 20));
 
-            for (int i = 0; i < 6; i++)
+            for (int i = 0; i < ParamLabels.Length; i++)
             {
                 float y = -106 - i * 24;
                 Txt(host, ParamLabels[i], 12, _dim, new Vector2(16, y), new Vector2(96, 20));
@@ -930,8 +1067,8 @@ namespace Delphi
         // ════════════════════════════════════════════════════════════════
         //  SPEED STRIP — how fast the car is going, what it's TRYING to go,
         //  and what's stopping it from going faster. That last part is the
-        //  point: the cruise target is the posted limit minus the
-        //  speedBelowLimit margin minus the corner slowdown, so "why won't it
+        //  point: the cruise target is the posted limit, pulled down by the
+        //  corner slowdown, a red light or a lead vehicle — so "why won't it
         //  exceed X" has several possible answers and guessing between them
         //  from a bare speed number is impossible. CarDriver.Limiter names
         //  whichever term actually bound the target this frame.
@@ -1237,7 +1374,7 @@ namespace Delphi
             int frameRows = Mathf.Max(1, Mathf.CeilToInt(frame.Length / (float)GridCols));
             float boxW = GridCols * (_cellW + GridColGap) - GridColGap + 32f;
             float scalarBoxH = CardHeaderH + scalarRows * GridRowH + (scalarRows - 1) * GridRowGap + 16f;
-            float frameBoxH = CardHeaderH + frameRows * GridRowH + (frameRows - 1) * GridRowGap + 16f;
+            float frameBoxH = CardHeaderH + frameRows * FrameRowH + (frameRows - 1) * GridRowGap + 16f;
 
             var scalarBox = Card(root, "Scalar Sensors — physiological & behavioral signals",
                 new Vector2(GridX0, GridY0), new Vector2(boxW, scalarBoxH));
@@ -1256,7 +1393,10 @@ namespace Delphi
 
         private Panel BuildSensorCell(Transform parent, bool isFrame, Channel channel, FrameChannel frameChannel)
         {
-            float titleH = GridTitleH, valH = GridValH, rowH = GridRowH;
+            // Frame rows are taller than scalar rows — see FrameCellH.
+            float titleH = GridTitleH, valH = GridValH;
+            float contentH = isFrame ? FrameCellH : _cellH;
+            float rowH = contentH + titleH + valH;
             string label = isFrame ? DelphiManager.FrameMeta(frameChannel).label : DelphiManager.Meta(channel).label;
 
             // Position is provisional — RelayoutGrid() packs the ACTIVE cells
@@ -1271,7 +1411,7 @@ namespace Delphi
             var raw = imgGO.GetComponent<RawImage>(); raw.color = Color.white;
             var irt = imgGO.GetComponent<RectTransform>();
             irt.anchorMin = irt.anchorMax = new Vector2(0, 1); irt.pivot = new Vector2(0, 1);
-            irt.anchoredPosition = new Vector2(0, -(titleH + valH)); irt.sizeDelta = new Vector2(_cellW, _cellH);
+            irt.anchoredPosition = new Vector2(0, -(titleH + valH)); irt.sizeDelta = new Vector2(_cellW, contentH);
 
             var panel = new Panel { isFrame = isFrame, cell = cont, cellRt = crt, title = t, value = v, image = raw };
             if (isFrame)

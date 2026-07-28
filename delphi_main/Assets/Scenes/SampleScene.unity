@@ -2489,7 +2489,7 @@ GameObject:
   - component: {fileID: 81696302}
   - component: {fileID: 81696303}
   m_Layer: 0
-  m_Name: 2 - StopAndGo (250 m)
+  m_Name: 3 - StopAndGo (250 m)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -2645,7 +2645,7 @@ GameObject:
   - component: {fileID: 95379956}
   - component: {fileID: 95379957}
   m_Layer: 0
-  m_Name: 3 - Turn (395-3000 m)
+  m_Name: 4 - Turn (395-3000 m)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -2679,7 +2679,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Delphi.Simulation.TrackEvent
   kind: 2
-  s: 395.22314
+  s: 395.27728
   endS: 3000
   waitDuration: 3
   limitKmh: 30
@@ -5280,6 +5280,9 @@ Transform:
   - {fileID: 1319649829}
   - {fileID: 1630552710}
   - {fileID: 705783338}
+  - {fileID: 195838078}
+  - {fileID: 927858436}
+  - {fileID: 996267226}
   m_Father: {fileID: 1037761337}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &174583721
@@ -5902,6 +5905,50 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 192344717}
   m_CullTransparentMesh: 0
+--- !u!1 &195838077
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 195838078}
+  - component: {fileID: 195838079}
+  m_Layer: 0
+  m_Name: Varjo_InterBlinkInterval
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &195838078
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 195838077}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 171821663}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &195838079
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 195838077}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2af56da1c6ac7c64e92f1d2d7158dbd0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.EyeBlinkIntervalSensor
 --- !u!1 &198588686
 GameObject:
   m_ObjectHideFlags: 0
@@ -5934,6 +5981,7 @@ Transform:
   - {fileID: 500385128}
   - {fileID: 1472681599}
   - {fileID: 2122961929}
+  - {fileID: 654516841}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &202818697
@@ -11313,6 +11361,117 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 384054995}
   m_CullTransparentMesh: 0
+--- !u!1 &386320291
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 386320292}
+  - component: {fileID: 386320293}
+  - component: {fileID: 386320295}
+  - component: {fileID: 386320297}
+  - component: {fileID: 386320296}
+  m_Layer: 0
+  m_Name: VrRig
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &386320292
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 386320291}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: -27.51915, y: -4.99999, z: -289.59732}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1271093018}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &386320293
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 386320291}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e62e3a3208322604d862e43b965ea27d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.VR.VrRig
+  participantCamera: {fileID: 1271093020}
+  makeOtherCamerasFlat: 1
+  nearClipMeters: 0.03
+  tagAsMainCamera: 1
+  autoRecenterDelaySeconds: -1
+  recenterKey: 105
+  diagnosticsKey: 104
+  mirrorMode: 1
+  eyeTextureResolutionScale: 1
+--- !u!114 &386320295
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 386320291}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a1e8078dda8c83048ae99c0aa03e5771, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.VR.VrHandTracking
+  temporalWarping: 0
+  physicalHandsManagerPrefab: {fileID: 5481279275633608576, guid: 710c6a51e481b5a419c8c7a3eae1bada, type: 3}
+  handModelPrefabs:
+  - {fileID: 118734816077698762, guid: 1d338fed0ed7df84a86c220153fbcc35, type: 3}
+  applyXr3Offsets: 1
+--- !u!114 &386320296
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 386320291}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b7aa766126b3c764289576a9d727d646, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.VR.VrParticipantHud
+  manager: {fileID: 0}
+  session: {fileID: 0}
+  visibleOnStart: 1
+  toggleKey: 99
+  localPosition: {x: 0, y: 1, z: 1}
+  localEulerAngles: {x: 0, y: 0, z: 0}
+  sizeMeters: {x: 1, y: 1}
+  refreshHz: 30
+--- !u!114 &386320297
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 386320291}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e1c0bd728d0ca8b4fa28f1102e4b33df, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.VR.VrPokeUi
+  provider: {fileID: 0}
+  pokeDepthMeters: 0.05
+  edgePaddingPixels: -4
+  maxPokeSpeed: 2.5
+  logPresses: 0
+  rescanSeconds: 1
 --- !u!1 &391805576
 GameObject:
   m_ObjectHideFlags: 0
@@ -18727,6 +18886,64 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 654493385}
   m_CullTransparentMesh: 0
+--- !u!1 &654516840
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 654516841}
+  - component: {fileID: 654516842}
+  m_Layer: 0
+  m_Name: VarjoGazeConnection
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &654516841
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 654516840}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 2.73665, y: 0, z: -38.47771}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 198588687}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &654516842
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 654516840}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 372435b6b425d8b4ebf83e9770fbcdac, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.VarjoGazeConnection
+  outputFrequency: 0
+  outputFilter: 1
+  calibrationKey: 103
+  calibrationMode: 0
+  neutralGazeKey: 102
+  neutralGazeWindowSeconds: 1
+  autoCaptureNeutralGaze: 1
+  maxNeutralGazeDispersionDegrees: 3
+  closeFraction: 0.5
+  openFraction: 0.75
+  minBlinkSeconds: 0.04
+  maxBlinkSeconds: 0.6
+  minOpenEyeReference: 0.15
+  signalTimeoutSeconds: 1
 --- !u!1 &656285314
 GameObject:
   m_ObjectHideFlags: 0
@@ -20067,7 +20284,7 @@ GameObject:
   - component: {fileID: 703712519}
   - component: {fileID: 703712518}
   m_Layer: 0
-  m_Name: Overview Indicators
+  m_Name: Track Overview Indicators
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -26862,6 +27079,7 @@ Transform:
   - {fileID: 1425785810}
   - {fileID: 988303696}
   - {fileID: 1531519422}
+  - {fileID: 2068766582}
   m_Father: {fileID: 1037761337}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &893097198
@@ -27156,7 +27374,7 @@ MonoBehaviour:
     higherIsBetter: 0
   - channel: 3
     sd: 50
-    higherIsBetter: 0
+    higherIsBetter: 1
   - channel: 4
     sd: 5
     higherIsBetter: 0
@@ -27223,12 +27441,12 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 900000020}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 2.86546, y: 0, z: -39.19782}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 0}
+  m_Father: {fileID: 1532902269}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &900000022
 MonoBehaviour:
@@ -27248,6 +27466,12 @@ MonoBehaviour:
   localPosition: {x: 0, y: 0, z: 0.5}
   localEulerAngles: {x: 0, y: 0, z: 0}
   sizeMeters: {x: 0.5, y: 0.44}
+  usePhysicalSlidersInVr: 1
+  physicalSliderPrefab: {fileID: 3123228626017199020, guid: f0859577120b0ab4ca075e25fb2e6ab1, type: 3}
+  vrLocalPosition: {x: 0, y: 0.85, z: 0.45}
+  vrLocalEulerAngles: {x: 20, y: 0, z: 0}
+  sliderTravelMeters: 0.16
+  sliderSpacingMeters: 0.055
 --- !u!1 &906743445
 GameObject:
   m_ObjectHideFlags: 0
@@ -28037,6 +28261,50 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 922437841}
   m_CullTransparentMesh: 0
+--- !u!1 &927858435
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 927858436}
+  - component: {fileID: 927858437}
+  m_Layer: 0
+  m_Name: Varjo_GazeDistance
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &927858436
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 927858435}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 171821663}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &927858437
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 927858435}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 171edf306ebcfb44d9dbddb4779aca83, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.GazeDistanceSensor
 --- !u!1 &930684052
 GameObject:
   m_ObjectHideFlags: 0
@@ -29841,7 +30109,7 @@ GameObject:
   - component: {fileID: 987965044}
   - component: {fileID: 987965043}
   m_Layer: 0
-  m_Name: Overview Camera
+  m_Name: Track Overview Camera
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -29882,15 +30150,15 @@ Camera:
   far clip plane: 5000
   field of view: 130
   orthographic: 1
-  orthographic size: 843.4
+  orthographic size: 554
   m_Depth: 0
   m_CullingMask:
     serializedVersion: 2
     m_Bits: 4294967295
   m_RenderingPath: -1
   m_TargetTexture: {fileID: 0}
-  m_TargetDisplay: 0
-  m_TargetEye: 3
+  m_TargetDisplay: 2
+  m_TargetEye: 0
   m_HDR: 1
   m_AllowMSAA: 1
   m_AllowDynamicResolution: 0
@@ -29907,7 +30175,7 @@ Transform:
   m_GameObject: {fileID: 987965041}
   serializedVersion: 2
   m_LocalRotation: {x: 0.7071068, y: -0, z: -0, w: 0.7071068}
-  m_LocalPosition: {x: 486.64, y: 150, z: 108.5}
+  m_LocalPosition: {x: 252.7, y: 150, z: -176.7}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -29960,6 +30228,7 @@ MonoBehaviour:
   sourceCamera: {fileID: 1271093020}
   width: 1920
   height: 1080
+  stereoEye: 2
 --- !u!1 &988525402
 GameObject:
   m_ObjectHideFlags: 0
@@ -30429,6 +30698,50 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 991935537}
   m_CullTransparentMesh: 0
+--- !u!1 &996267225
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 996267226}
+  - component: {fileID: 996267227}
+  m_Layer: 0
+  m_Name: Varjo_PupilDiameter
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &996267226
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 996267225}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 171821663}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &996267227
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 996267225}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2bebf2468d7dd9a459dcfd70c0bbbcfb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.PupilDiameterSensor
 --- !u!1 &999932756
 GameObject:
   m_ObjectHideFlags: 0
@@ -31632,7 +31945,7 @@ GameObject:
   - component: {fileID: 1032869434}
   - component: {fileID: 1032869435}
   m_Layer: 0
-  m_Name: 4 - StopAndGo (1500 m)
+  m_Name: 5 - StopAndGo (1500 m)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -31647,7 +31960,7 @@ Transform:
   m_GameObject: {fileID: 1032869433}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 499.63037, y: 0, z: -41.2626}
+  m_LocalPosition: {x: 499.63037, y: 0, z: -41.26254}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -36365,7 +36678,7 @@ GameObject:
   - component: {fileID: 1184401893}
   - component: {fileID: 1184401894}
   m_Layer: 0
-  m_Name: 5 - Park (2865 m)
+  m_Name: 6 - Park (2865 m)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -39222,10 +39535,11 @@ Transform:
   m_GameObject: {fileID: 1271093017}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 3, z: 0}
+  m_LocalPosition: {x: 0, y: 5, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
+  - {fileID: 386320292}
   - {fileID: 1182917662}
   m_Father: {fileID: 2014745829}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -42561,7 +42875,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8cf4b7804dbb43a4a13ac09f04b4a7fb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  spawnObjectsInWorldSpace: 0
+  spawnObjectsInWorldSpace: 1
   qtMetaData: {fileID: 11400000, guid: b9a5630233ae1a442b2345df096b83b0, type: 2}
   overrideManagerSettings: 0
   startWithScene: 0
@@ -42633,7 +42947,7 @@ MonoBehaviour:
         _target: {fileID: 1351782037}
         _component: QTQuestionnaireManager
         _name: BoContextGroupIdForCsv
-  pageBackgroundColor: {r: 0.9245, g: 0.9245, b: 0.9245, a: 0.8}
+  pageBackgroundColor: {r: 0.9245, g: 0.9245, b: 0.9245, a: 1}
   pageBottomColor: {r: 0.76, g: 0.88, b: 1, a: 1}
   highlightColor: {r: 0, g: 0.67, b: 1, a: 1}
   running: 0
@@ -43172,7 +43486,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.33144236, y: 0}
   m_AnchorMax: {x: 0.33144236, y: 0}
-  m_AnchoredPosition: {x: 0.2999878, y: 29.33667}
+  m_AnchoredPosition: {x: 0.30004883, y: 29.33667}
   m_SizeDelta: {x: 149.42, y: 38.54}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1371190620
@@ -47828,7 +48142,7 @@ GameObject:
   - component: {fileID: 1531519422}
   - component: {fileID: 1531519421}
   m_Layer: 0
-  m_Name: SceneOverview_CameraFrame
+  m_Name: TrackOverview_CameraFrame
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -47849,6 +48163,7 @@ MonoBehaviour:
   sourceCamera: {fileID: 987965043}
   width: 1280
   height: 720
+  stereoEye: 0
 --- !u!4 &1531519422
 Transform:
   m_ObjectHideFlags: 0
@@ -48109,6 +48424,7 @@ Transform:
   - {fileID: 1219209570}
   - {fileID: 745759215}
   - {fileID: 977851524}
+  - {fileID: 900000021}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1534698599
@@ -52596,6 +52912,55 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1674569497}
   m_CullTransparentMesh: 0
+--- !u!1 &1676919948
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1676919949}
+  - component: {fileID: 1676919950}
+  m_Layer: 0
+  m_Name: 2 - StopAndGo (100 m)
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1676919949
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1676919948}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.8828964, y: 0, z: 99.99608}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 2115074266}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1676919950
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1676919948}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fdc582c6b1c984d7ebb46b95d9a1cb1f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.Simulation.TrackEvent
+  kind: 0
+  s: 99.95153
+  endS: 99.95153
+  waitDuration: 3
+  limitKmh: 30
 --- !u!1 &1680700709
 GameObject:
   m_ObjectHideFlags: 0
@@ -54709,11 +55074,11 @@ MonoBehaviour:
   gsrPhasic: {fileID: 0}
   gazeRateHz: 60
   blinkIntervalOn: 1
-  blinkInterval: {fileID: 824068707}
+  blinkInterval: {fileID: 195838079}
   gazeOn: 1
-  gaze: {fileID: 824068707}
+  gaze: {fileID: 927858437}
   pupilDiameterOn: 1
-  pupilDiameter: {fileID: 824068707}
+  pupilDiameter: {fileID: 996267227}
   imuRateHz: 60
   accXOn: 0
   accX: {fileID: 2079785515}
@@ -54727,15 +55092,18 @@ MonoBehaviour:
   webcamOn: 1
   webcam: {fileID: 1425785811}
   webcamFps: 30
-  sceneOverviewOn: 1
-  sceneOverview: {fileID: 1531519421}
-  sceneOverviewFps: 30
+  trackOverviewOn: 1
+  trackOverview: {fileID: 1531519421}
+  trackOverviewFps: 30
   playerViewOn: 1
   playerView: {fileID: 988303697}
   playerViewFps: 30
-  panorama360On: 1
+  panorama360On: 0
   panorama360: {fileID: 1425288970}
-  panorama360Fps: 60
+  panorama360Fps: 10
+  eyeCamerasOn: 0
+  eyeCameras: {fileID: 2068766581}
+  eyeCamerasFps: 15
 --- !u!4 &1745511444
 Transform:
   m_ObjectHideFlags: 0
@@ -56801,6 +57169,7 @@ MonoBehaviour:
   sessionsFolder: C:\Users\VRadmin\Desktop\delphi_recordings
   ffmpegPath: 
   flipVideoVertically: 1
+  recordFeed: 0000000000
 --- !u!4 &1798600216
 Transform:
   m_ObjectHideFlags: 0
@@ -63239,14 +63608,10 @@ MonoBehaviour:
     brakingJerkOn: 1
     followDistanceOn: 1
     corneringSpeedOn: 1
-    takeoverProbabilityOn: 1
-    speedBelowLimitOn: 1
     accelerationJerk: 0.5
     brakingJerk: 0.5
     followDistance: 0.5
     corneringSpeed: 0.5
-    takeoverProbability: 0.5
-    speedBelowLimit: 0.5
     accelJerkMin: 1
     accelJerkMax: 4
     brakeJerkMin: 1
@@ -63255,8 +63620,6 @@ MonoBehaviour:
     followMax: 2.5
     cornerSlowdownMinKmh: 5
     cornerSlowdownMaxKmh: 30
-    belowLimitMinKmh: 0
-    belowLimitMaxKmh: 15
   startParked: 1
   logStateChanges: 0
 --- !u!4 &2014745829
@@ -65183,6 +65546,52 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2067149645}
   m_CullTransparentMesh: 0
+--- !u!1 &2068766580
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2068766582}
+  - component: {fileID: 2068766581}
+  m_Layer: 0
+  m_Name: Varjo_EyeCameras
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &2068766581
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2068766580}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7bc23122720013e4e9cf29ddcf075ea8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.VarjoEyeCameraSensor
+  drawEyeDivider: 1
+  logStreamConfig: 1
+--- !u!4 &2068766582
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2068766580}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 892928741}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2069888083
 GameObject:
   m_ObjectHideFlags: 0
@@ -68089,6 +68498,7 @@ Transform:
   - {fileID: 95379956}
   - {fileID: 1032869434}
   - {fileID: 1184401893}
+  - {fileID: 1676919949}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2117796203
@@ -69531,7 +69941,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8cf4b7804dbb43a4a13ac09f04b4a7fb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  spawnObjectsInWorldSpace: 0
+  spawnObjectsInWorldSpace: 1
   qtMetaData: {fileID: 11400000, guid: b9a5630233ae1a442b2345df096b83b0, type: 2}
   overrideManagerSettings: 1
   startWithScene: 0
@@ -69541,7 +69951,7 @@ MonoBehaviour:
   pageHeight: 900
   dynamicHeight: 0
   useCustomTransform: 0
-  distanceToCamera: 1
+  distanceToCamera: 1.3
   pageScaleFactor: 1
   colorScheme: 4
   sliderValue: 20
@@ -69618,7 +70028,6 @@ SceneRoots:
   - {fileID: 1037761337}
   - {fileID: 1274969128}
   - {fileID: 1532902269}
-  - {fileID: 900000021}
   - {fileID: 1996786008}
   - {fileID: 1745511444}
   - {fileID: 1798600216}

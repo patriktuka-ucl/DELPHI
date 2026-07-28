@@ -433,7 +433,7 @@ namespace Delphi.Session
         private static readonly string[] ParameterKeys =
         {
             "accelerationJerk", "brakingJerk", "followDistance",
-            "corneringSpeed", "takeoverProbability", "speedBelowLimit"
+            "corneringSpeed"
         };
 
         private void Awake()
@@ -553,6 +553,36 @@ namespace Delphi.Session
             }
         }
 
+        /// <summary>DEBUG ONLY — jump straight past the current timed phase.
+        ///
+        /// The meditation is several minutes long and sits in front of every
+        /// single condition, so testing anything downstream means sitting
+        /// through it repeatedly. This skips it.
+        ///
+        /// IT IS NOT A SHORTCUT FOR REAL SESSIONS AND IT SAYS SO LOUDLY.
+        /// The meditation IS the baseline window — skipping it means the
+        /// condition that follows has no baseline to score its deviations
+        /// against, so that trial's data is not comparable to a proper run.
+        /// The warning names the phase so it is unmistakable in the log if
+        /// somebody does it by accident during a participant run.</summary>
+        public void DebugSkipPhase()
+        {
+            if (CurrentPhase == Phase.Idle || CurrentPhase == Phase.Complete)
+            {
+                Debug.LogWarning($"[Trial] Skip ignored — nothing running ({CurrentPhase}).", this);
+                return;
+            }
+
+            Debug.LogWarning($"[Trial] DEBUG SKIP of {CurrentPhase}." +
+                             (CurrentPhase == Phase.Meditation
+                                 ? " THE MEDITATION IS THE BASELINE WINDOW — the following condition will have " +
+                                   "no baseline and its data must not be treated as a valid trial."
+                                 : ""), this);
+
+            narration?.StopSpeaking();
+            AdvanceToNextSegment();
+        }
+
         /// <summary>Researcher: the participant has said they're done roaming.
         /// Ends the FreeRoam condition and falls into the SAME tail every other
         /// condition has — the car heads to the park marker while the
@@ -573,7 +603,27 @@ namespace Delphi.Session
         /// what was active when. No-op outside FreePlay.</summary>
         public void SetFreePlayParameter(string key, float value)
         {
-            if (CurrentPhase != Phase.FreePlay || carDriver == null) return;
+            // SILENTLY DISCARDING THESE COST A LOT OF DEBUGGING TIME.
+            //
+            // Driving parameters are only writable during FreePlay — correct,
+            // because in the measured conditions the optimizer owns them and a
+            // stray slider would corrupt the trial. But a plain `return` makes
+            // a slider that does nothing indistinguishable from a slider that
+            // is not wired up, and outside FreePlay that is EVERY slider.
+            // Say so instead.
+            if (carDriver == null)
+            {
+                Debug.LogWarning($"[Trial] Driving parameter '{key}' ignored — no CarDriver assigned.", this);
+                return;
+            }
+            if (CurrentPhase != Phase.FreePlay)
+            {
+                Debug.LogWarning($"[Trial] Driving parameter '{key}' ignored — parameters are only adjustable " +
+                                 $"during FreePlay, and the session is in {CurrentPhase}. In the measured " +
+                                 "conditions the optimizer owns these values.", this);
+                return;
+            }
+
             SetParam(carDriver.parameters, key, Mathf.Clamp01(value));
             _lastFreePlayActivity = DelphiClock.Now; // they're engaged — restart the idle countdown
             LogFreePlayRow();
@@ -688,7 +738,7 @@ namespace Delphi.Session
             var row = new StringBuilder();
             row.Append(F(DelphiClock.Now - _freePlayStart));
             foreach (float v in new[] { p.accelerationJerk, p.brakingJerk, p.followDistance,
-                                        p.corneringSpeed, p.takeoverProbability, p.speedBelowLimit })
+                                        p.corneringSpeed })
                 row.Append(',').Append(F(v));
             _freePlayLog.WriteLine(row.ToString());
             _freePlayLog.Flush();
@@ -1555,8 +1605,6 @@ namespace Delphi.Session
             "brakingJerk"         => carDriver.parameters.brakingJerkOn,
             "followDistance"      => carDriver.parameters.followDistanceOn,
             "corneringSpeed"      => carDriver.parameters.corneringSpeedOn,
-            "takeoverProbability" => carDriver.parameters.takeoverProbabilityOn,
-            "speedBelowLimit"     => carDriver.parameters.speedBelowLimitOn,
             _                     => true
         };
 
@@ -1705,8 +1753,6 @@ namespace Delphi.Session
             "brakingJerk"         => p.brakingJerk,
             "followDistance"      => p.followDistance,
             "corneringSpeed"      => p.corneringSpeed,
-            "takeoverProbability" => p.takeoverProbability,
-            "speedBelowLimit"     => p.speedBelowLimit,
             _                     => 0f
         };
 
@@ -1718,8 +1764,6 @@ namespace Delphi.Session
                 case "brakingJerk":         p.brakingJerk         = v; break;
                 case "followDistance":      p.followDistance      = v; break;
                 case "corneringSpeed":      p.corneringSpeed      = v; break;
-                case "takeoverProbability": p.takeoverProbability = v; break;
-                case "speedBelowLimit":     p.speedBelowLimit     = v; break;
             }
         }
 
@@ -1926,7 +1970,7 @@ namespace Delphi.Session
             row.Append(F(_measureStart - _trialStart)).Append(',');
             row.Append(F(DelphiClock.Now - _trialStart));
             foreach (float v in new[] { p.accelerationJerk, p.brakingJerk, p.followDistance,
-                                        p.corneringSpeed, p.takeoverProbability, p.speedBelowLimit })
+                                        p.corneringSpeed })
                 row.Append(',').Append(F(v));
             foreach (var c in objectiveCells) row.Append(',').Append(c);
             row.Append(',').Append(float.IsNaN(LastCoverage) ? "NaN" : F(LastCoverage));
@@ -2042,18 +2086,14 @@ namespace Delphi.Session
             var p = carDriver.parameters;
             var ranges = new[]
             {
-                new TrialParameterRangeMeta { key = "accelerationJerk", unit = "m/s^3",
+                new TrialParameterRangeMeta { key = "accelerationJerk", unit = "m/s^2",
                     physicalMin = p.accelJerkMin, physicalMax = p.accelJerkMax },
-                new TrialParameterRangeMeta { key = "brakingJerk", unit = "m/s^3",
+                new TrialParameterRangeMeta { key = "brakingJerk", unit = "m/s^2",
                     physicalMin = p.brakeJerkMin, physicalMax = p.brakeJerkMax },
                 new TrialParameterRangeMeta { key = "followDistance", unit = "s headway (inverted: 0=far/gentle, 1=close/assertive)",
                     physicalMin = p.followMax, physicalMax = p.followMin },
                 new TrialParameterRangeMeta { key = "corneringSpeed", unit = "km/h cut in the tightest realistic turn (inverted: 0=cuts a lot/gentle, 1=barely cuts/assertive)",
                     physicalMin = p.cornerSlowdownMaxKmh, physicalMax = p.cornerSlowdownMinKmh },
-                new TrialParameterRangeMeta { key = "takeoverProbability", unit = "probability",
-                    physicalMin = 0f, physicalMax = 1f },
-                new TrialParameterRangeMeta { key = "speedBelowLimit", unit = "km/h below posted limit (inverted: 0=big margin/gentle, 1=at limit/assertive)",
-                    physicalMin = p.belowLimitMaxKmh, physicalMax = p.belowLimitMinKmh },
             };
             foreach (var r in ranges) r.active = _activeParamKeys.Contains(r.key);
             return ranges;

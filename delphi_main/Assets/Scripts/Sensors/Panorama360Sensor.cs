@@ -39,9 +39,10 @@ namespace Delphi
                  "participant and all UI belong here — see the class summary.")]
         public LayerMask excludedLayers;
 
-        [Tooltip("Also exclude these objects' layers automatically at start " +
-                 "(the car root, for instance). Belt-and-braces alongside the " +
-                 "mask above.")]
+        [Tooltip("Hierarchies hidden for the instant this feed renders — the " +
+                 "car root belongs here. These are excluded by switching their " +
+                 "RENDERERS off for the duration of the cubemap render, NOT by " +
+                 "layer, so it works however the car is laid out.")]
         public Transform[] excludeHierarchies;
 
         private RenderTexture _cube;
@@ -71,25 +72,54 @@ namespace Delphi
             _renderCam = go.AddComponent<Camera>();
             _renderCam.enabled = false;      // rendered manually
             _renderCam.targetDisplay = 7;    // never a real display
+            _renderCam.stereoTargetEye = StereoTargetEyeMask.None; // never an XR camera, even in VR
             _renderCam.nearClipPlane = 0.05f;
             _renderCam.farClipPlane = 2000f;
 
             _hasFrame = false;
         }
 
+        /// <summary>Caches the renderers to hide while this feed renders.
+        ///
+        /// THIS USED TO FOLD THE HIERARCHIES' LAYERS INTO THE EXCLUSION MASK,
+        /// AND THAT SILENTLY CULLED THE ENTIRE WORLD. The car sits on the
+        /// Default layer — so do the track, the environment and essentially
+        /// everything else — so "exclude every layer the car uses" resolved to
+        /// "exclude Default", and the panorama rendered nothing but skybox.
+        /// The feed still looked alive, which is what made it hard to spot.
+        ///
+        /// A camera can only cull by layer, so no mask can express "everything
+        /// except the children of this transform" while the car shares a layer
+        /// with the world. Toggling the renderers themselves can, exactly, and
+        /// without moving anything onto a new layer — which would have risked
+        /// the physics collision matrix and every layer-masked raycast in the
+        /// driving code for a change that is only ever about what is DRAWN.</summary>
         private void Start()
         {
-            // Fold the named hierarchies' layers into the exclusion mask, so
-            // "don't record the car" survives someone moving the car to a
-            // different layer later.
-            if (excludeHierarchies == null) return;
-            foreach (var root in excludeHierarchies)
-            {
-                if (root == null) continue;
-                foreach (var t in root.GetComponentsInChildren<Transform>(true))
-                    excludedLayers |= 1 << t.gameObject.layer;
-            }
+            RebuildExcludedRenderers();
         }
+
+        /// <summary>Re-scans the excluded hierarchies. Call after spawning or
+        /// swapping anything under them at run time.</summary>
+        public void RebuildExcludedRenderers()
+        {
+            var found = new System.Collections.Generic.List<Renderer>();
+            if (excludeHierarchies != null)
+            {
+                foreach (var root in excludeHierarchies)
+                {
+                    if (root == null) continue;
+                    root.GetComponentsInChildren(true, _scratch);
+                    found.AddRange(_scratch);
+                }
+            }
+            _excluded = found.ToArray();
+            _wasEnabled = new bool[_excluded.Length];
+        }
+
+        private readonly System.Collections.Generic.List<Renderer> _scratch = new();
+        private Renderer[] _excluded = System.Array.Empty<Renderer>();
+        private bool[] _wasEnabled = System.Array.Empty<bool>();
 
         private void OnDisable()
         {
@@ -107,10 +137,40 @@ namespace Delphi
             _renderCam.transform.SetPositionAndRotation(point.position, Quaternion.identity);
             _renderCam.cullingMask = ~excludedLayers.value;
 
-            // Six faces in one call, then unwrap. Identity rotation on the
-            // stereo param keeps it monoscopic — a stereo pair would double
-            // the cost for no analytical gain here.
-            if (!_renderCam.RenderToCubemap(_cube, 63)) return CurrentFrame;
+            // Hide the ego vehicle for the duration of the render only.
+            //
+            // Safe to toggle here because RenderToCubemap is SYNCHRONOUS and
+            // this runs from DelphiManager's Update: no other camera draws
+            // between the disable and the restore, so nothing else — the
+            // participant's own view least of all — ever sees the car vanish.
+            for (int i = 0; i < _excluded.Length; i++)
+            {
+                var r = _excluded[i];
+                if (r == null) continue;
+                _wasEnabled[i] = r.enabled;
+                r.enabled = false;
+            }
+
+            bool rendered;
+            try
+            {
+                // Six faces in one call, then unwrap. Identity rotation on the
+                // stereo param keeps it monoscopic — a stereo pair would double
+                // the cost for no analytical gain here.
+                rendered = _renderCam.RenderToCubemap(_cube, 63);
+            }
+            finally
+            {
+                // finally, because leaving the car invisible after a throw
+                // would break the participant's view rather than just this feed.
+                for (int i = 0; i < _excluded.Length; i++)
+                {
+                    var r = _excluded[i];
+                    if (r != null) r.enabled = _wasEnabled[i];
+                }
+            }
+
+            if (!rendered) return CurrentFrame;
             _cube.ConvertToEquirect(_equirect);
             _hasFrame = true;
 
