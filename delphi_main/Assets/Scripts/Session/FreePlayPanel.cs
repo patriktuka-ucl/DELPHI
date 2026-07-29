@@ -437,8 +437,7 @@ namespace Delphi.Session
             // slider uses, and the reason none of this needs imported art.
             var bg = NewImage(canvasGO.transform, new Color(0.055f, 0.065f, 0.085f, 0.94f));
             Stretch(bg.rectTransform);
-            var bgSprite = Resources.GetBuiltinResource<Sprite>("UI/Skin/UISprite.psd");
-            if (bgSprite != null) { bg.sprite = bgSprite; bg.type = Image.Type.Sliced; }
+            bg.sprite = RoundedSprite; bg.type = Image.Type.Sliced;
 
             // Accent rule under the title — the one bit of colour that tells
             // you which surface you are looking at without reading it.
@@ -654,8 +653,7 @@ namespace Delphi.Session
 
             var bg = NewImage(go.transform, new Color(1f, 1f, 1f, 0.10f));
             Stretch(bg.rectTransform);
-            var bgSprite = Resources.GetBuiltinResource<Sprite>("UI/Skin/UISprite.psd");
-            if (bgSprite != null) { bg.sprite = bgSprite; bg.type = Image.Type.Sliced; }
+            bg.sprite = RoundedSprite; bg.type = Image.Type.Sliced;
 
             // Font size follows the button, so a long label on a narrow button
             // stays inside it. Ten presets is a legitimate design; ten presets
@@ -696,6 +694,46 @@ namespace Delphi.Session
             rt.anchoredPosition = pos;
             rt.sizeDelta = size;
             return rt;
+        }
+
+        // ── Procedural sprites ───────────────────────────────────────────
+        //
+        // Drawn, not loaded — the same decision as VrTouchSlider and
+        // VrParticipantHud, for the same reason. Unity's built-in UI skin
+        // sprite lives in the editor-only "builtin extra" resources, so
+        // Resources.GetBuiltinResource<Sprite>("UI/Skin/UISprite.psd")
+        // resolves to null in a player build ("Failed to find
+        // UI/Skin/UISprite.psd") and the panel silently degrades to hard
+        // rectangles. One 64x64 texture, built once, cannot fail.
+        private static Sprite _rounded;
+        private static Sprite RoundedSprite => _rounded ??= MakeRounded(64, 18);
+
+        /// <summary>Rounded rectangle with a 9-slice border, so it keeps its
+        /// corner radius at any size the layout stretches it to.</summary>
+        private static Sprite MakeRounded(int size, int radius)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            {
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            var px = new Color[size * size];
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                // Distance outside the inner rect whose corners are the arcs.
+                float dx = Mathf.Max(radius - x - 0.5f, 0f, x + 0.5f - (size - radius));
+                float dy = Mathf.Max(radius - y - 0.5f, 0f, y + 0.5f - (size - radius));
+                float d = Mathf.Sqrt(dx * dx + dy * dy);
+                // One-pixel feather, so edges are smooth instead of stepped.
+                px[y * size + x] = new Color(1f, 1f, 1f, Mathf.Clamp01(radius - d + 0.5f));
+            }
+            tex.SetPixels(px); tex.Apply();
+
+            float b = radius;
+            return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f),
+                                 100f, 0, SpriteMeshType.FullRect, new Vector4(b, b, b, b));
         }
 
         private Image NewImage(Transform parent, Color c)

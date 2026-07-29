@@ -175,6 +175,46 @@ namespace Delphi.Session
             public int slot;              // 1..3 — which of the three drives this is
         }
 
+        /// <summary>One STOP on the researcher's timeline — the five things a
+        /// session is actually made of from the outside: the intro, the three
+        /// conditions, the end. Deliberately coarser than the segment plan: a
+        /// condition's meditation, framing line, drive and evaluation are one
+        /// stop between them, because "jump to condition 2" means the whole
+        /// run-up to that drive, never the drive with its baseline skipped.
+        ///
+        /// A stop OWNS a contiguous run of plan segments — [firstSegment,
+        /// lastSegment] — which is what makes both jumping (enter
+        /// firstSegment) and progress (how far through the run we are) fall
+        /// out of the same structure rather than needing two mappings that can
+        /// disagree.</summary>
+        public readonly struct TimelineStop
+        {
+            public readonly string label;        // "INTRO", "CONDITION 2", "END"
+            public readonly string detail;       // "Implicit", "welcome & briefing", …
+            public readonly int firstSegment;    // plan index this stop begins at
+            public readonly int lastSegment;     // inclusive; the segment before the next stop
+            /// <summary>Rough wall-clock length of the whole stop, used to
+            /// weight the progress bar. 0 for END.</summary>
+            public readonly float estimatedSeconds;
+            public readonly bool isCondition;
+            public readonly ConditionKind condition; // conditions only
+            public readonly int slot;                // 1..3 for conditions, 0 otherwise
+
+            public TimelineStop(string label, string detail, int firstSegment, int lastSegment,
+                                float estimatedSeconds, bool isCondition,
+                                ConditionKind condition, int slot)
+            {
+                this.label = label;
+                this.detail = detail;
+                this.firstSegment = firstSegment;
+                this.lastSegment = lastSegment;
+                this.estimatedSeconds = estimatedSeconds;
+                this.isCondition = isCondition;
+                this.condition = condition;
+                this.slot = slot;
+            }
+        }
+
         [Header("Links (auto-found if left empty)")]
         public DelphiManager manager;
         public CarDriver carDriver;
@@ -248,6 +288,16 @@ namespace Delphi.Session
                  "condition, the automatic timer stops re-firing. The " +
                  "researcher's manual button is never limited.")]
         [Min(1)] public int exploreNudgeMaxAuto = 2;
+
+        [Header("Timeline (researcher UI only)")]
+        [Tooltip("Nominal length of the Explore/FreeRoam drive, in seconds. " +
+                 "FreeRoam is open-ended by design — it ends when the " +
+                 "participant says so — so nothing can know its real length. " +
+                 "This number is used ONLY to weight the timeline's progress " +
+                 "bar, so an Explore slot doesn't count as zero and make the " +
+                 "session look further along than it is. It never affects the " +
+                 "condition itself, the data, or when anything ends.")]
+        [Min(30f)] public float freeRoamEstimatedSeconds = 300f;
 
         [Header("Trial structure — per condition kind")]
         public ConditionTrialConfig implicitTrial = new();
@@ -391,6 +441,12 @@ namespace Delphi.Session
         private Phase _interruptedPhase; // what EmergencyStop/Fail paused, for Resume
         private int _interruptedSegment; // Fail()'s Resume path only — rewinds and restarts the segment
 
+        // ── Timeline state (researcher UI) ──────────────────────────────
+        // The stops are a VIEW of the plan, rebuilt with it — see BuildPlan.
+        private readonly List<TimelineStop> _timeline = new();
+        private int _timelineOrder = -1;  // which orderIndex _timeline was built for
+        private double _sessionStart;     // DelphiClock time the session began, 0 = not started
+
         // ── EmergencyStop/Resume pause state (Phase.EmergencyStop only) ──
         private double _pausedRemaining = -1;  // remaining _phaseEnd countdown at the moment of pausing, -1 = none was running
         private bool _pausedIsAwaitingResearcher;
@@ -475,6 +531,7 @@ namespace Delphi.Session
             BuildPlan();
             _segmentIndex = -1;
             ConditionNumber = 0;
+            _sessionStart = DelphiClock.Now;
             Debug.Log($"[Session] Starting — participant '{userId}', order {orderIndex}/{OrderCount} " +
                       $"({DescribeOrder(orderIndex)}), {_plan.Count} segments.");
             AdvanceToNextSegment();
@@ -979,13 +1036,17 @@ namespace Delphi.Session
         private void BuildPlan()
         {
             _plan.Clear();
+            _timeline.Clear();
+            _timelineOrder = orderIndex;
 
+            AddStop("INTRO", "welcome & briefing");
             Add(SegmentKind.Intro);
 
             var order = OrderFor(orderIndex);
             for (int i = 0; i < order.Length; i++)
             {
                 int slot = i + 1;
+                AddStop($"CONDITION {slot}", KindLabel(order[i]), order[i], slot);
                 AddConditionSegment(SegmentKind.Meditation, order[i], slot);
                 AddConditionSegment(SegmentKind.ConditionIntro, order[i], slot);
                 AddConditionSegment(SegmentKind.Condition, order[i], slot);
@@ -993,8 +1054,64 @@ namespace Delphi.Session
                 if (i < order.Length - 1) Add(SegmentKind.BreakOffer);
             }
 
+            AddStop("END", "closing");
             Add(SegmentKind.Complete);
+
+            MeasureStops();
         }
+
+        /// <summary>"FreeRoam" is the internal name; the researcher UI has
+        /// called that condition Explore everywhere else since the exploration
+        /// rebuild, and a timeline that disagrees with the buttons beside it is
+        /// worse than either name on its own.</summary>
+        public static string KindLabel(ConditionKind kind) =>
+            kind == ConditionKind.FreeRoam ? "Explore" : kind.ToString();
+
+        /// <summary>Opens a timeline stop at whatever the NEXT segment added
+        /// will be — so it has to be called immediately before that
+        /// segment's Add. The span (lastSegment) and length are filled in by
+        /// MeasureStops once the whole plan exists.</summary>
+        private void AddStop(string label, string detail,
+                             ConditionKind condition = default, int slot = 0) =>
+            _timeline.Add(new TimelineStop(label, detail, _plan.Count, _plan.Count,
+                                           0f, slot > 0, condition, slot));
+
+        /// <summary>Second pass over the finished plan: give every stop its
+        /// segment span and its estimated length. Separate from AddStop
+        /// because a stop's extent is only knowable once the stop AFTER it
+        /// exists, and its length is the sum over the segments in between.</summary>
+        private void MeasureStops()
+        {
+            for (int i = 0; i < _timeline.Count; i++)
+            {
+                var s = _timeline[i];
+                int last = (i + 1 < _timeline.Count ? _timeline[i + 1].firstSegment : _plan.Count) - 1;
+                float est = 0f;
+                for (int seg = s.firstSegment; seg <= last && seg < _plan.Count; seg++)
+                    est += SegmentEstimatedSeconds(_plan[seg]);
+                _timeline[i] = new TimelineStop(s.label, s.detail, s.firstSegment, last,
+                                                est, s.isCondition, s.condition, s.slot);
+            }
+        }
+
+        /// <summary>Rough wall-clock length of ONE plan segment. Every one of
+        /// these is an estimate the researcher can already see elsewhere in the
+        /// UI (narration clip lengths, EstimatedConditionSeconds) — the point
+        /// here is only to weight the timeline so a two-minute meditation and a
+        /// twenty-minute drive don't advance the bar equally. BreakOffer is 0:
+        /// it's untimed by design and its length says nothing about how far
+        /// through the protocol anyone is.</summary>
+        private float SegmentEstimatedSeconds(in Segment seg) => seg.kind switch
+        {
+            SegmentKind.Intro          => NarrationSeconds(NarrationController.Line.Intro),
+            SegmentKind.Meditation     => NarrationSeconds(NarrationController.Line.Meditation),
+            SegmentKind.ConditionIntro => NarrationSeconds(ConditionIntroLine(seg.slot, seg.condition)),
+            SegmentKind.Condition      => seg.condition == ConditionKind.FreeRoam
+                                            ? Mathf.Max(1f, freeRoamEstimatedSeconds)
+                                            : EstimatedConditionSeconds(seg.condition),
+            SegmentKind.Questionnaire  => NarrationSeconds(TrialEvalLine(seg.slot)),
+            _                          => 0f,
+        };
 
         private void Add(SegmentKind kind, float seconds = 0f) =>
             _plan.Add(new Segment { kind = kind, seconds = seconds });
@@ -2353,6 +2470,201 @@ namespace Delphi.Session
 
         private void OnDestroy() => Cleanup();
         private void OnApplicationQuit() => Cleanup();
+
+        // ══ TIMELINE — the researcher's map of the session ═══════════════
+        //  Five stops (intro, three conditions, end), each owning a run of
+        //  plan segments. Everything below is read-only except JumpToStop.
+        // ═════════════════════════════════════════════════════════════════
+
+        /// <summary>The stops, in order. Available BEFORE the session starts
+        /// too — the researcher has to be able to see what order 4 actually
+        /// means, and start at a specific stop, while still idle.
+        ///
+        /// While idle the plan is rebuilt on demand whenever orderIndex has
+        /// changed since it was last built. That is safe precisely because
+        /// BuildPlan is a pure function of orderIndex with no side effects
+        /// beyond _plan/_timeline, and a running session never takes this
+        /// branch — CanStart is false for every phase between Intro and
+        /// Complete, and the UI locks the order buttons then anyway.</summary>
+        public IReadOnlyList<TimelineStop> Timeline
+        {
+            get
+            {
+                if (CanStart && (_timelineOrder != orderIndex || _timeline.Count == 0)) BuildPlan();
+                return _timeline;
+            }
+        }
+
+        /// <summary>Which stop the session is inside right now, or -1 when it
+        /// hasn't started. Derived from the segment index rather than tracked
+        /// separately, so it cannot drift out of step with the plan walk —
+        /// including after a jump, an error restart or an emergency stop
+        /// (which pauses in place and leaves _segmentIndex alone).</summary>
+        public int CurrentStopIndex
+        {
+            get
+            {
+                if (CurrentPhase == Phase.Idle || _timeline.Count == 0) return -1;
+                int found = 0;
+                for (int i = 0; i < _timeline.Count; i++)
+                {
+                    if (_segmentIndex < _timeline[i].firstSegment) break;
+                    found = i;
+                }
+                return found;
+            }
+        }
+
+        /// <summary>0 for a stop not reached yet, 1 for one already passed, and
+        /// the fraction through it for the one running.</summary>
+        public float StopProgress01(int stopIndex)
+        {
+            int cur = CurrentStopIndex;
+            if (cur < 0 || stopIndex < 0 || stopIndex >= _timeline.Count) return 0f;
+            if (stopIndex < cur) return 1f;
+            if (stopIndex > cur) return 0f;
+
+            var stop = _timeline[stopIndex];
+            float total = 0f, done = 0f;
+            for (int seg = stop.firstSegment; seg <= stop.lastSegment && seg < _plan.Count; seg++)
+            {
+                float w = SegmentEstimatedSeconds(_plan[seg]);
+                total += w;
+                if (seg < _segmentIndex) done += w;
+                else if (seg == _segmentIndex) done += w * CurrentSegmentFraction01();
+            }
+            return total <= 0f ? (_segmentIndex >= stop.lastSegment ? 1f : 0f)
+                               : Mathf.Clamp01(done / total);
+        }
+
+        /// <summary>How far through the CURRENT segment we are. Each kind knows
+        /// its own answer: timed segments from their countdown, a BO drive from
+        /// its iteration count, and FreeRoam — which has no length at all — from
+        /// elapsed time against freeRoamEstimatedSeconds, capped just short of
+        /// full so an open-ended roam never reads as finished while it's still
+        /// running.</summary>
+        private float CurrentSegmentFraction01()
+        {
+            if (_segmentIndex < 0 || _segmentIndex >= _plan.Count) return 0f;
+            var seg = _plan[_segmentIndex];
+
+            if (seg.kind == SegmentKind.Condition)
+            {
+                if (CurrentPhase != Phase.FreePlay) return CurrentConditionProgress();
+                double elapsed = _driveStart > 0 ? DelphiClock.Now - _driveStart : 0;
+                return Mathf.Clamp((float)elapsed / Mathf.Max(1f, freeRoamEstimatedSeconds), 0f, 0.95f);
+            }
+
+            float est = SegmentEstimatedSeconds(seg);
+            if (est <= 0f) return 0f;
+            return Mathf.Clamp01(1f - (float)(PhaseSecondsRemaining / est));
+        }
+
+        /// <summary>How far through the whole session we are, weighted by each
+        /// stop's estimated length — so the bar tracks time rather than
+        /// counting a two-minute intro as a fifth of the protocol.</summary>
+        public float SessionProgress01
+        {
+            get
+            {
+                var stops = Timeline;
+                int cur = CurrentStopIndex;
+                if (cur < 0 || stops.Count == 0) return 0f;
+                if (CurrentPhase == Phase.Complete) return 1f;
+
+                float total = 0f, done = 0f;
+                for (int i = 0; i < stops.Count; i++)
+                {
+                    float w = Mathf.Max(0f, stops[i].estimatedSeconds);
+                    total += w;
+                    if (i < cur) done += w;
+                    else if (i == cur) done += w * StopProgress01(i);
+                }
+                return total <= 0f ? 0f : Mathf.Clamp01(done / total);
+            }
+        }
+
+        /// <summary>Estimated wall-clock length of the whole session.</summary>
+        public float EstimatedSessionSeconds
+        {
+            get
+            {
+                float total = 0f;
+                foreach (var s in Timeline) total += Mathf.Max(0f, s.estimatedSeconds);
+                return total;
+            }
+        }
+
+        /// <summary>Real time since the session started. 0 before it does.</summary>
+        public double SessionElapsedSeconds =>
+            _sessionStart > 0 && CurrentPhase != Phase.Idle ? DelphiClock.Now - _sessionStart : 0;
+
+        /// <summary>Go straight to a stop — starting the session there when
+        /// idle, or abandoning whatever is running and picking up from there
+        /// when it isn't.
+        ///
+        /// THIS THROWS DATA AWAY AND IS MEANT TO. It exists for piloting,
+        /// re-runs and recovering a session that has gone wrong — not for
+        /// ordinary running, which walks the plan by itself. So a mid-session
+        /// jump gets the same teardown an abort does (recordings finalised,
+        /// trial metadata written, optimizer disposed and relaunched) rather
+        /// than a cheaper one: the alternative is a truncated mp4 and a BO
+        /// process still carrying the abandoned condition's model into the next
+        /// one. Everything it discards is named in the log, loudly, because
+        /// from the data's side a jumped-over condition and a completed one
+        /// must never look alike afterwards.
+        ///
+        /// Refused during an emergency stop: that state is a pause with a
+        /// participant on a rig mid-incident, and the way out of it is RESUME,
+        /// not a silent relocation to somewhere else in the protocol.</summary>
+        public bool JumpToStop(int stopIndex)
+        {
+            if (_quitting) return false;
+
+            if (CurrentPhase == Phase.EmergencyStop)
+            {
+                Debug.LogWarning("[Session] Jump refused — the rig is in an emergency stop. " +
+                                 "Resume it first (F1), then jump.");
+                return false;
+            }
+
+            var stops = Timeline;            // builds the plan for us if we're idle
+            if (stopIndex < 0 || stopIndex >= stops.Count)
+            {
+                Debug.LogWarning($"[Session] Jump refused — no stop {stopIndex} on a {stops.Count}-stop timeline.");
+                return false;
+            }
+            string label = stops[stopIndex].label;
+
+            if (CanStart)
+            {
+                if (!ValidateTrackForSession()) return false;
+                BuildPlan();                 // fresh, for whatever orderIndex is set NOW
+                ConditionNumber = 0;
+                _sessionStart = DelphiClock.Now;
+                Debug.Log($"[Session] Starting at '{label}' — participant '{userId}', " +
+                          $"order {orderIndex}/{OrderCount} ({DescribeOrder(orderIndex)}), " +
+                          $"{_plan.Count} segments.");
+            }
+            else
+            {
+                Debug.LogWarning($"[Session] JUMP from {CurrentPhase} to '{label}'. Whatever this " +
+                                 "condition had recorded is being closed where it stands — it is a " +
+                                 "partial run and must not be analysed as a completed one. The stop " +
+                                 "jumped into starts a fresh recording of its own.");
+                narration?.StopSpeaking();
+                delphiQuestionnairePanel?.Hide();
+                conditionEvaluationPanel?.Hide();
+                carDriver?.ResetToStart();   // never leave the car driving itself
+                motionCues?.ReturnToNeutral(returnToNeutralSeconds);
+                Cleanup($"Jumped to {label}");
+                PrewarmOptimizer();          // the next condition needs a live one
+            }
+
+            _segmentIndex = _timeline[stopIndex].firstSegment - 1;
+            AdvanceToNextSegment();
+            return true;
+        }
 
         // ── Read helpers for the researcher UI ──────────────────────────
         public ConditionKind ConditionKindAt(int slot)

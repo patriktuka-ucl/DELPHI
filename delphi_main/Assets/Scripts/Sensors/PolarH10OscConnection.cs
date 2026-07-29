@@ -156,14 +156,21 @@ namespace Delphi
             var mgr = FindFirstObjectByType<DelphiManager>();
             int accRateHz = mgr != null ? Mathf.RoundToInt(mgr.imuRateHz) : 25;
 
+            // --stdin-shutdown lets StopPythonBridge() below ask the bridge to
+            // disconnect from the strap BEFORE dying. Killing it outright leaves
+            // the strap holding a half-open link until its own supervision
+            // timeout expires, and during that window it neither advertises nor
+            // accepts a new central — which is exactly what made the NEXT Play
+            // press sit there for 45s.
             var startInfo = new ProcessStartInfo
             {
                 FileName = pythonExe,
-                Arguments = $"\"{scriptPath}\" --acc-rate {accRateHz}",
+                Arguments = $"\"{scriptPath}\" --acc-rate {accRateHz} --stdin-shutdown",
                 WorkingDirectory = projectRoot,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                RedirectStandardInput = true,
                 CreateNoWindow = true
             };
 
@@ -184,6 +191,11 @@ namespace Delphi
             }
         }
 
+        // How long to let the bridge close its BLE link before killing it. A
+        // clean BLE disconnect is fast (well under this); the budget only exists
+        // so a wedged bridge can't stall exiting Play mode.
+        private const int GracefulStopTimeoutMs = 1200;
+
         private void StopPythonBridge()
         {
             if (_pythonProcess == null) return;
@@ -191,8 +203,30 @@ namespace Delphi
             {
                 if (!_pythonProcess.HasExited)
                 {
-                    _pythonProcess.Kill();
-                    _pythonProcess.WaitForExit(1000);
+                    // Ask first (bridge disconnects from the strap, then exits),
+                    // kill only if it won't go. See --stdin-shutdown above for
+                    // why the polite path matters for the NEXT connect's speed.
+                    bool exited = false;
+                    try
+                    {
+                        _pythonProcess.StandardInput.WriteLine("quit");
+                        _pythonProcess.StandardInput.Flush();
+                        _pythonProcess.StandardInput.Close();
+                        exited = _pythonProcess.WaitForExit(GracefulStopTimeoutMs);
+                    }
+                    catch (Exception)
+                    {
+                        // stdin already gone — fall through to Kill.
+                    }
+
+                    if (!exited && !_pythonProcess.HasExited)
+                    {
+                        Debug.LogWarning("[PolarH10OscConnection] Bridge did not exit gracefully " +
+                                         "— killing it. The strap may hold a stale link for a few " +
+                                         "seconds, slowing the next connect.");
+                        _pythonProcess.Kill();
+                        _pythonProcess.WaitForExit(1000);
+                    }
                 }
             }
             catch (Exception)

@@ -259,18 +259,7 @@ namespace Delphi.VR
 
             // Under the camera, for the same reason as the provider: the
             // collider hands must travel with the car, not stay at the origin.
-            //
-            // INSTANTIATED INACTIVE, exactly like the service provider.
-            // Instantiate() activates immediately, so the manager's Awake ran
-            // with InputProvider still null — it had no hand source at the one
-            // moment it builds its ContactParent, so no collider hands were
-            // ever created. Assigning the provider on the next line was too
-            // late and nothing re-ran the setup. The result is hands you can
-            // see and cannot touch anything with, which is exactly the
-            // "can't grab them, poke them, anything" symptom: the sliders were
-            // fine, there was simply nothing physical to press them.
             var go = Instantiate(physicalHandsManagerPrefab, _cam.transform);
-            go.SetActive(false);
             go.name = "[VR] Physical Hands Manager";
 
             PhysicalHands = go.GetComponent<PhysicalHandsManager>();
@@ -281,8 +270,22 @@ namespace Delphi.VR
                 return;
             }
 
+            // ASSIGNED WHILE ACTIVE, and that is the whole point.
+            // PhysicalHandsManager's InputProvider setter does two things:
+            // it subscribes to the provider's frame events, and it starts the
+            // PostFixedUpdate coroutine that drives contact resolution. A
+            // coroutine cannot be started on an inactive GameObject, so
+            // assigning the provider before activating logged
+            // "Coroutine couldn't be started because the the game object
+            // '[VR] Physical Hands Manager' is inactive!" and lost that half
+            // of the wiring until something re-ran the setter.
+            //
+            // Nothing is lost by assigning after activation: the manager's
+            // Awake only finds its authored ContactParent and generates the
+            // physics layers, and the collider hands themselves are built in
+            // ContactParent.Start — none of which reads InputProvider. The
+            // provider is in place well before the first frame is dispatched.
             PhysicalHands.InputProvider = Provider;
-            go.SetActive(true); // now Awake runs, with a provider already in place
         }
 
         /// <summary>Spawns the hand models under this rig and points them at

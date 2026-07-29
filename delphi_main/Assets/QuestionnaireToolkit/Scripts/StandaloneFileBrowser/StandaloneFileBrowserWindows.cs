@@ -1,4 +1,29 @@
-#if UNITY_STANDALONE_WIN
+// COMPILED OUT ON PURPOSE — the define below is set nowhere, and the two
+// plugins this file needs (Ookii.Dialogs.dll and System.Windows.Forms.dll,
+// next door in Plugins/) are disabled for every platform including the Editor.
+//
+// The project's System.Windows.Forms.dll is a .NET Framework 2.0.0.0 assembly.
+// Unity's own Mono profile ships System.Windows.Forms 4.0.0.0, so referencing
+// ours loaded TWO assemblies with the same simple name into the Editor domain.
+// Unity 6's OrderedAssemblyList.TopologicalSort builds one SortNode per loaded
+// assembly, sorts them, then locates each one with
+//   Array.BinarySearch(sortNodes, node, VersionLessComparer)
+// which compares by NAME ONLY. With a duplicate name both lookups return the
+// same index, so one node never gets its Dependencies array assigned, and
+// TopologicalSortRecursive then takes .Length of that null:
+//   Lifecycle ERROR : Failed to setup LifecycleManagement ...
+//   NullReferenceException at OrderedAssemblyList.TopologicalSortRecursive
+// It fired on 111 of 112 domain reloads.
+//
+// Nothing is lost. StandaloneFileBrowser picks the Editor wrapper whenever
+// UNITY_EDITOR is defined, so this class was already dead code in the Editor,
+// and its only callers (QTQuestionnaireManager.ImportPages / ExportPages) are
+// questionnaire-authoring tools, not participant-facing runtime features.
+//
+// TO RESTORE native Windows dialogs in a player build: re-enable both plugins
+// in the Inspector and add QT_NATIVE_WINDOWS_DIALOGS to Scripting Define
+// Symbols — and expect the lifecycle error to come back in the Editor.
+#if QT_NATIVE_WINDOWS_DIALOGS && UNITY_STANDALONE_WIN
 
 using System;
 using System.IO;

@@ -145,6 +145,7 @@ namespace Delphi
         private void Update()
         {
             HandleKeyboard();
+            RefreshTimeline();
             RefreshSessionCard();
             RefreshTrialCard();
             RefreshBaselineCard();
@@ -419,15 +420,21 @@ namespace Delphi
                 irt.sizeDelta = new Vector2(Mathf.Min(cw, _maxFrameW), h);
             }
 
-            // Background AND header together — a resized box with a stale
-            // header bar is the "background doesn't cover the whole thing" look.
-            if (_frameBoxRt != null) _frameBoxRt.sizeDelta = new Vector2(FrameBoxW, FrameBoxH);
-            if (_frameHeaderRt != null) _frameHeaderRt.sizeDelta = new Vector2(FrameBoxW, CardHeaderH);
-
             // The pack signature is unchanged (the same cells are active), so
             // force the reflow that would otherwise be skipped as a no-op.
+            // RelayoutGrid re-sizes both boxes and their headers on the way out.
             _lastLayoutSig = -1;
             RelayoutGrid();
+
+            // The right column was placed once, at build, against the centre
+            // column's width at THAT moment. Widen the feeds past it and they
+            // slide underneath it — recoverable (turn the slider back) but
+            // baffling in silence, so say which slider did it.
+            if (FrameBoxW > _builtCentreColW + 0.5f)
+                Debug.LogWarning($"[ExperimentUI] The camera-feed box is now {FrameBoxW:0}px wide but the " +
+                                 $"dashboard reserved {_builtCentreColW:0}px for the sensor grid, so the feeds " +
+                                 "are running under the Forces/Connections column. Reduce Frame Columns, " +
+                                 "Frame Max Width or Frame Gap Horizontal.", this);
         }
 
         // ════════════════════════════════════════════════════════════════
@@ -490,7 +497,7 @@ namespace Delphi
         // Grid layout — shared by BuildSensorGrid and RelayoutGrid so the live
         // reflow lands cells in exactly the same slots the initial build uses.
         private const int GridCols = 4;
-        private const float GridX0 = 496, GridY0 = -60, GridColGap = 14, GridRowGap = 12;
+        private const float GridX0 = 496, GridY0 = ColumnTopY, GridColGap = 14, GridRowGap = 12;
         private const float GridTitleH = 18, GridValH = 16;
         private float GridRowH => _cellH + GridTitleH + GridValH;
         /// <summary>Frame rows are taller than scalar rows, so the frame box
@@ -546,11 +553,13 @@ namespace Delphi
             if (sig == _lastLayoutSig) return; // set unchanged — nothing to move
             _lastLayoutSig = sig;
 
-            PackSection(isFrame: false);
-            PackSection(isFrame: true);
+            _scalarRows = PackSection(isFrame: false);
+            _frameRows  = PackSection(isFrame: true);
+            ResizeSensorBoxes();
         }
 
-        private void PackSection(bool isFrame)
+        /// <summary>Returns how many rows the section actually packed into.</summary>
+        private int PackSection(bool isFrame)
         {
             int idx = 0;
             foreach (var p in _panels)
@@ -572,6 +581,30 @@ namespace Delphi
                     SectionContentY - row * rowPitch);
                 idx++;
             }
+            return Mathf.Max(1, Mathf.CeilToInt(idx / (float)(isFrame ? FrameCols : GridCols)));
+        }
+
+        /// <summary>Size each sensor box to the rows it IS SHOWING, and hang
+        /// the frame box off the scalar box's live bottom edge.
+        ///
+        /// Both boxes used to be measured for every channel the enum defines,
+        /// so a rig with six of twelve scalars plugged in drew a box with a
+        /// whole empty row of background under the last waveform, and the frame
+        /// box below it started that same dead row lower down. Nothing was
+        /// wrong with the cells — the box was just built for a grid that wasn't
+        /// there. Packing already knows the real answer (PackSection returns
+        /// it), so the boxes follow it.</summary>
+        private void ResizeSensorBoxes()
+        {
+            if (_scalarBoxRt == null || _frameBoxRt == null) return;
+
+            float scalarH = CardHeaderH + _scalarRows * GridRowH + (_scalarRows - 1) * GridRowGap + 16f;
+            _scalarBoxRt.sizeDelta = new Vector2(ScalarBoxW, scalarH);
+            if (_scalarHeaderRt != null) _scalarHeaderRt.sizeDelta = new Vector2(ScalarBoxW, CardHeaderH);
+
+            _frameBoxRt.anchoredPosition = new Vector2(GridX0, GridY0 - scalarH - 16f);
+            _frameBoxRt.sizeDelta = new Vector2(FrameBoxW, FrameBoxH);
+            if (_frameHeaderRt != null) _frameHeaderRt.sizeDelta = new Vector2(FrameBoxW, CardHeaderH);
         }
 
         private void RefreshScalar(Panel p)
@@ -995,6 +1028,7 @@ namespace Delphi
         // ════════════════════════════════════════════════════════════════
         //  EVENT LOG
         // ════════════════════════════════════════════════════════════════
+        private const int LogLines = 13;
         private readonly List<string> _log = new();
         private Text _logText;
         private Text _baselineText;
@@ -1004,7 +1038,7 @@ namespace Delphi
         private void Log(string line)
         {
             _log.Add($"{DateTime.Now:HH:mm:ss}  {line}");
-            if (_log.Count > 14) _log.RemoveAt(0);
+            if (_log.Count > LogLines) _log.RemoveAt(0);
             if (_logText != null) _logText.text = string.Join("\n", _log);
         }
 
@@ -1061,9 +1095,11 @@ namespace Delphi
             var bg = NewImage(_root, _bg); Stretch(bg.rectTransform);
 
             // Header
-            var title = Txt(_root, "DELPHI — Experiment Control", 24, _text, new Vector2(24, -16), new Vector2(700, 32));
+            var title = Txt(_root, "DELPHI — Experiment Control", 24, _text,
+                            new Vector2(EdgeMargin, -14), new Vector2(700, 30));
             title.fontStyle = FontStyle.Bold;
 
+            BuildTimelineCard(_root);
             BuildSessionCard(_root);
             BuildTrialCard(_root);
             BuildBaselineCard(_root);
@@ -1072,12 +1108,271 @@ namespace Delphi
             BuildConnectionsCard(_root);
             BuildEventLog(_root);
             BuildTransport(_root);
+
+            VerifyLayout();
+        }
+
+        /// <summary>Width the right column was actually placed against —
+        /// snapshotted at build, because the feed sliders can change
+        /// CentreColW afterwards and the column does not move.</summary>
+        private float _builtCentreColW;
+
+        /// <summary>Re-checks the column arithmetic against the real card
+        /// heights once everything is built, and names anything that lands on
+        /// top of anything else.
+        ///
+        /// It is here because this file has now produced the same class of bug
+        /// three separate times — a card grown without moving the one below it,
+        /// a box measured for a wider grid than the screen has room for, a
+        /// banner positioned past the bottom of its own card. Each was invisible
+        /// until it appeared on the researcher's screen mid-session. The
+        /// constants are all derived from each other now, which prevents most
+        /// of it; this catches the rest at startup, in the log, where it costs
+        /// nothing to read.</summary>
+        private void VerifyLayout()
+        {
+            _builtCentreColW = CentreColW;
+
+            void Check(string what, float bottomY)
+            {
+                if (bottomY >= TransportTopY) return;
+                Debug.LogWarning($"[ExperimentUI] The {what} column ends at y={bottomY:0}, past the transport " +
+                                 $"bar's top edge ({TransportTopY:0}) — its bottom card is drawing under the " +
+                                 "record/playback controls.", this);
+            }
+
+            Check("left", BaselineCardY - BaselineCardH);
+            Check("right", GridY0 - GizmoCardH - 12 - ConnectionsCardH - 12 - EventLogCardH);
+            // The centre column is the one that moves at runtime (feed sliders),
+            // so it's measured from the live boxes rather than from constants.
+            Check("centre", _frameBoxRt != null
+                ? _frameBoxRt.anchoredPosition.y - _frameBoxRt.sizeDelta.y
+                : TransportTopY);
+
+            if (RightColumnX + RightColW > CanvasW - EdgeMargin + 0.5f)
+                Debug.LogWarning($"[ExperimentUI] The right column runs to x={RightColumnX + RightColW:0} on a " +
+                                 $"{CanvasW:0}px dashboard — the sensor grid is too wide to leave it room. " +
+                                 "Reduce Frame Columns or Frame Max Width.", this);
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        //  TIMELINE — the whole session as the five things it's actually
+        //  made of: intro, the three conditions in this participant's
+        //  counterbalancing order, end.
+        //
+        //  It answers two questions the rest of the dashboard could only
+        //  answer piecemeal: WHERE ARE WE (one rail, filled by estimated
+        //  time rather than by stop count, so a two-minute intro doesn't
+        //  read as a fifth of the protocol), and CAN WE GO SOMEWHERE ELSE
+        //  (click a stop). Jumping is genuinely destructive — see
+        //  SessionController.JumpToStop — so every stop except "start at
+        //  the beginning while idle" arms on the first click and only acts
+        //  on a second one, the same way QUIT & SAVE does.
+        //
+        //  The stops come from SessionController.Timeline, which is derived
+        //  from the same plan the session actually walks. Nothing here
+        //  duplicates the protocol — a plan change shows up in this strip
+        //  on its own.
+        // ════════════════════════════════════════════════════════════════
+        private const float TimelineX = EdgeMargin, TimelineY = -52f, TimelineH = 96f;
+        private const float TimelineW = CanvasW - 2f * EdgeMargin;
+        private const float TimelineSideMargin = 16f;
+        private const float TimelineRailY = -58f;   // rail centreline, from the card's top
+        private const float TimelinePillH = 30f, TimelineRailThickness = 3f;
+        /// <summary>How long a stop stays armed after the first click. Same
+        /// four seconds as QUIT & SAVE: longer than any double-click, shorter
+        /// than a change of mind.</summary>
+        private const float StopArmSeconds = 4f;
+
+        private class StopNode
+        {
+            public Image pill, fill;       // fill is the per-stop progress inside the pill
+            public RectTransform fillRt;
+            public Text label, status;
+            public float pillW;
+        }
+        private readonly List<StopNode> _stops = new();
+        private RectTransform _railFillRt;
+        private float _railLen;
+        private Text _timelineSummary;
+        private int _armedStop = -1;
+        private float _armedUntil;
+
+        private void BuildTimelineCard(Transform root)
+        {
+            var card = Card(root, "Session Timeline — click a stop to start or jump there",
+                            new Vector2(TimelineX, TimelineY), new Vector2(TimelineW, TimelineH));
+            var host = card.transform;
+
+            _timelineSummary = Txt(host, "", 13, _dim,
+                                   new Vector2(TimelineW - 16f - 620f, -8f), new Vector2(620, 20));
+            _timelineSummary.alignment = TextAnchor.UpperRight;
+
+            // The stop COUNT is fixed by the protocol (intro + three
+            // conditions + end) and identical for all six orders, so the
+            // widgets are built once here; only their labels change with the
+            // order, in RefreshTimeline.
+            int n = session != null ? session.Timeline.Count : 0;
+            if (n <= 0) { Debug.LogWarning("[ExperimentUI] No session timeline to draw."); return; }
+
+            float slotW = (TimelineW - 2f * TimelineSideMargin) / n;
+            float railX0 = TimelineSideMargin + slotW * 0.5f;
+            _railLen = slotW * (n - 1);
+
+            // Rail first, so every pill draws over it.
+            var rail = NewImage(host, _card2);
+            rail.rectTransform.anchoredPosition = new Vector2(railX0, TimelineRailY + TimelineRailThickness * 0.5f);
+            rail.rectTransform.sizeDelta = new Vector2(_railLen, TimelineRailThickness);
+            rail.raycastTarget = false;
+
+            var railFill = NewImage(host, _accent);
+            _railFillRt = railFill.rectTransform;
+            _railFillRt.anchoredPosition = rail.rectTransform.anchoredPosition;
+            _railFillRt.sizeDelta = new Vector2(0f, TimelineRailThickness);
+            railFill.raycastTarget = false;
+
+            float pillW = Mathf.Min(slotW - 26f, 240f);
+            for (int i = 0; i < n; i++)
+            {
+                int stop = i;               // capture per iteration, not the loop variable
+                float cx = TimelineSideMargin + slotW * (i + 0.5f);
+                var node = new StopNode { pillW = pillW };
+
+                node.pill = Btn(host, "", new Vector2(cx - pillW * 0.5f, TimelineRailY + TimelinePillH * 0.5f),
+                                new Vector2(pillW, TimelinePillH), () => OnStopClicked(stop), out node.label);
+                node.pill.color = _card2;
+
+                // The progress fill lives INSIDE the pill and is pushed behind
+                // the label — a stop that is half done is half filled, which is
+                // the same information the rail carries, at the resolution the
+                // researcher actually asks about ("how far into condition 2").
+                node.fill = NewImage(node.pill.transform, _running);
+                node.fill.transform.SetAsFirstSibling();
+                node.fill.raycastTarget = false;
+                node.fillRt = node.fill.rectTransform;
+                node.fillRt.anchoredPosition = Vector2.zero;
+                node.fillRt.sizeDelta = new Vector2(0f, TimelinePillH);
+
+                node.status = Txt(host, "", 11, _pending,
+                                  new Vector2(cx - slotW * 0.5f, TimelineRailY - TimelinePillH * 0.5f - 4f),
+                                  new Vector2(slotW, 16));
+                node.status.alignment = TextAnchor.UpperCenter;
+
+                _stops.Add(node);
+            }
+        }
+
+        /// <summary>First click arms, second click acts — except for the one
+        /// case that discards nothing: starting at stop 0 from idle, which is
+        /// exactly what the START SESSION button already does in one click.</summary>
+        private void OnStopClicked(int i)
+        {
+            if (session == null) return;
+            var stops = session.Timeline;
+            if (i < 0 || i >= stops.Count) return;
+
+            bool idle = session.CanStart;
+            string label = stops[i].label;
+            bool needsConfirm = !(idle && i == 0);
+
+            if (needsConfirm && !(_armedStop == i && Time.unscaledTime < _armedUntil))
+            {
+                _armedStop = i;
+                _armedUntil = Time.unscaledTime + StopArmSeconds;
+                Log(idle ? $"Click {label} again to START there (skips everything before it)."
+                         : $"Click {label} again to JUMP there (ends this condition; its data is partial).");
+                return;
+            }
+
+            _armedStop = -1;
+            _armedUntil = 0f;
+            if (session.JumpToStop(i)) Log($"→ {label}" + (idle ? " (session started here)" : " (jumped)"));
+            else Log($"{label}: refused — see the console for why.");
+        }
+
+        private void RefreshTimeline()
+        {
+            if (session == null || _stops.Count == 0) return;
+
+            var stops = session.Timeline;
+            int cur = session.CurrentStopIndex;
+            float progress = session.SessionProgress01;
+
+            _railFillRt.sizeDelta = new Vector2(_railLen * progress, TimelineRailThickness);
+
+            float est = session.EstimatedSessionSeconds;
+            double elapsed = session.SessionElapsedSeconds;
+            _timelineSummary.text = cur < 0
+                ? $"not started  ·  est. {Mmss(est)} total"
+                : $"{Mmss((float)elapsed)} elapsed  ·  est. {Mmss(est)} total  ·  {progress * 100f:F0}%";
+            _timelineSummary.color = cur < 0 ? _dim : _accent;
+
+            if (Time.unscaledTime >= _armedUntil) _armedStop = -1;
+
+            for (int i = 0; i < _stops.Count; i++)
+            {
+                var node = _stops[i];
+                bool have = i < stops.Count;
+                if (node.pill.gameObject.activeSelf != have) node.pill.gameObject.SetActive(have);
+                if (node.status.gameObject.activeSelf != have) node.status.gameObject.SetActive(have);
+                if (!have) continue;
+
+                var s = stops[i];
+                bool done = cur >= 0 && i < cur;
+                bool active = i == cur;
+                Color state = done ? _done : active ? _running : _pending;
+
+                if (_armedStop == i)
+                {
+                    node.pill.color = _estop;
+                    node.fillRt.sizeDelta = new Vector2(0f, TimelinePillH);
+                    node.label.text = session.CanStart ? "START HERE?" : "JUMP HERE?";
+                    node.label.color = _text;
+                }
+                else
+                {
+                    node.pill.color = _card2;
+                    node.fill.color = new Color(state.r, state.g, state.b, done || active ? 0.9f : 0.3f);
+                    node.fillRt.sizeDelta = new Vector2(node.pillW * session.StopProgress01(i), TimelinePillH);
+                    node.label.text = s.isCondition ? $"{s.label} · {s.detail.ToUpperInvariant()}" : s.label;
+                    node.label.color = done || active ? _text : _dim;
+                }
+
+                node.status.text = StopStatus(i, s, cur);
+                node.status.color = state;
+            }
+        }
+
+        /// <summary>The line under each pill. For the stop that's RUNNING this
+        /// is the live phase — the same PhaseLabel the session card shows —
+        /// because "CONDITION 2" alone doesn't distinguish a meditation from a
+        /// drive, and that distinction is most of what the researcher is
+        /// watching for.</summary>
+        private string StopStatus(int i, SessionController.TimelineStop s, int cur)
+        {
+            if (cur < 0)
+                return i == 0 ? "click to start here"
+                     : s.estimatedSeconds > 0 ? $"~{Mmss(s.estimatedSeconds)}" : "";
+            if (i < cur) return "done";
+            if (i > cur) return s.estimatedSeconds > 0 ? $"pending · ~{Mmss(s.estimatedSeconds)}" : "pending";
+
+            var phase = session.CurrentPhase;
+            if (phase == SessionController.Phase.Complete) return "complete";
+            string name = PhaseLabel(phase);
+            if (session.IsRunningCondition && session.TotalIterations > 0)
+                return $"{name} · iter {session.Iteration}/{session.TotalIterations}";
+            double left = session.PhaseSecondsRemaining;
+            return left > 0 ? $"{name} · {Mmss((float)left)} left" : name;
         }
 
         private void BuildSessionCard(Transform root)
         {
-            var card = Card(root, "Session", new Vector2(24, SessionCardY), new Vector2(452, SessionCardH));
+            var card = Card(root, "Session", new Vector2(LeftColX, SessionCardY), new Vector2(LeftColW, SessionCardH));
             var host = card.transform;
+            // One inset for every full-width control in this card, so the
+            // START button, the progress bar, the contextual row and the
+            // emergency stop all share the same left and right edges.
+            const float inset = 16f, fullW = LeftColW - 2f * inset;
 
             _preGroup = Empty(host, "pre");
 
@@ -1086,66 +1381,131 @@ namespace Delphi
             // as GroupID in every CSV — so it's a switch rather than a typed
             // field: a typo in a free-text group box would silently mislabel
             // the whole session's data.
-            Txt(_preGroup.transform, "Counterbalancing order", 13, _dim, new Vector2(16, -34), new Vector2(200, 20));
+            Txt(_preGroup.transform, "Counterbalancing order", 13, _dim, new Vector2(inset, -34), new Vector2(190, 20));
+            // Right-aligned as a block against the same inset as everything
+            // else, so the six buttons end where the START button does instead
+            // of stopping 8px short of it.
+            const float orderBtnW = 35f, orderGap = 4f;
+            float orderX = inset + fullW - SessionController.OrderCount * (orderBtnW + orderGap) + orderGap;
             for (int i = 0; i < SessionController.OrderCount; i++)
             {
                 int order = i + 1; // capture per-iteration, not the loop variable
                 _orderImg[i] = Btn(_preGroup.transform, order.ToString(),
-                    new Vector2(212 + i * 39, -32), new Vector2(35, 26),
+                    new Vector2(orderX + i * (orderBtnW + orderGap), -32), new Vector2(orderBtnW, 26),
                     () => session.orderIndex = order, out _);
             }
-            _orderPreviewTxt = Txt(_preGroup.transform, "", 12, _accent, new Vector2(16, -58), new Vector2(422, 18));
+            _orderPreviewTxt = Txt(_preGroup.transform, "", 12, _accent, new Vector2(inset, -60), new Vector2(fullW, 18));
 
             // Participant identifier — set per session here, not in the
             // Inspector (up to ~30 participants; a fixed Inspector value would
             // mean re-editing the prefab/scene between every run).
-            Txt(_preGroup.transform, "Participant ID", 13, _dim, new Vector2(16, -86), new Vector2(110, 20));
-            _userIdField = Field(_preGroup.transform, new Vector2(132, -84), new Vector2(140, 26), "P01");
+            Txt(_preGroup.transform, "Participant ID", 13, _dim, new Vector2(inset, -88), new Vector2(110, 20));
+            _userIdField = Field(_preGroup.transform, new Vector2(inset + 116, -86), new Vector2(140, 26), "P01");
             _userIdField.text = session.userId;
             _userIdField.onValueChanged.AddListener(v => session.userId = v);
 
-            _startImg = Btn(_preGroup.transform, "START SESSION", new Vector2(16, -148), new Vector2(422, 48),
+            _startImg = Btn(_preGroup.transform, "START SESSION", new Vector2(inset, -132), new Vector2(fullW, 48),
                 () => session.StartSession(), out _);
             _startImg.color = _btnSel;
+            Txt(_preGroup.transform, "…or click a stop on the timeline above to start there.", 12, _dim,
+                new Vector2(inset, -188), new Vector2(fullW, 18));
+
+            // Live rows. Every Y is derived from the row above it and every row
+            // knows its own height, so the block cannot drift into the one
+            // under it — which is how the stopped banner ended up 8px below the
+            // bottom edge of the card it is drawn in.
+            const float phaseH = 24f, statusH = 30f, condPitch = 22f, condH = 20f, barH = 10f;
+            const float phaseY = -34f;
+            const float statusY = phaseY - phaseH - 2f;                    // -60
+            const float condTop = statusY - statusH - 4f;                  // -94
+            float barY = condTop - _condLabel.Length * condPitch - 4f;     // -164
+            float actionY = barY - barH - 6f;                              // -180
+            float estopY = actionY - ActionRowH - 6f;                      // -222
+            float bannerY = estopY - EstopRowH - 4f;                       // -270 (ends -286)
 
             _liveGroup = Empty(host, "live");
-            _phaseTxt = Txt(_liveGroup.transform, "—", 20, _running, new Vector2(16, -34), new Vector2(422, 26)); _phaseTxt.fontStyle = FontStyle.Bold;
-            _statusTxt = Txt(_liveGroup.transform, "", 13, _dim, new Vector2(16, -60), new Vector2(422, 32));
+            _phaseTxt = Txt(_liveGroup.transform, "—", 20, _running, new Vector2(inset, phaseY), new Vector2(fullW, phaseH));
+            _phaseTxt.fontStyle = FontStyle.Bold;
+            _statusTxt = Txt(_liveGroup.transform, "", 13, _dim, new Vector2(inset, statusY), new Vector2(fullW, statusH));
             for (int i = 0; i < _condLabel.Length; i++)
             {
-                float y = -96 - i * 23; // 3 rows now — tightened to clear the bar below
-                _condLabel[i] = Txt(_liveGroup.transform, $"Cond {i + 1}", 14, _pending, new Vector2(16, y), new Vector2(200, 22));
-                _condTime[i] = Txt(_liveGroup.transform, "", 13, _pending, new Vector2(210, y), new Vector2(228, 22));
+                float y = condTop - i * condPitch;
+                _condLabel[i] = Txt(_liveGroup.transform, $"Cond {i + 1}", 14, _pending, new Vector2(inset, y), new Vector2(200, condH));
+                _condTime[i] = Txt(_liveGroup.transform, "", 13, _pending, new Vector2(inset + 194, y), new Vector2(fullW - 194, condH));
                 _condTime[i].alignment = TextAnchor.UpperRight;
             }
-            _condBar = Bar(_liveGroup.transform, new Vector2(16, -166), new Vector2(422, 10), _accent);
+            _condBar = Bar(_liveGroup.transform, new Vector2(inset, barY), new Vector2(fullW, barH), _accent);
 
-            // Contextual buttons (shared row ~ -176)
-            var wide = new Vector2(422, 38); var pos = new Vector2(16, -178);
+            // Contextual buttons — one shared row, either full width or split
+            // in two with a single gap.
+            const float halfGap = 12f;
+            float halfW = (fullW - halfGap) / 2f;
+            var wide = new Vector2(fullW, ActionRowH);
+            var half = new Vector2(halfW, ActionRowH);
+            var pos = new Vector2(inset, actionY);
+            var posRight = new Vector2(inset + halfW + halfGap, actionY);
             _qDoneBtn = BtnObj(host, "QUESTIONNAIRE DONE", pos, wide, () => session.ConfirmQuestionnaire());
-            _breakBtn = BtnObj(host, "BREAK", new Vector2(16, -178), new Vector2(205, 38), () => session.ChooseBreak());
-            _continueBtn = BtnObj(host, "CONTINUE", new Vector2(233, -178), new Vector2(205, 38), () => session.ChooseContinue());
+            _breakBtn = BtnObj(host, "BREAK", pos, half, () => session.ChooseBreak());
+            _continueBtn = BtnObj(host, "CONTINUE", posRight, half, () => session.ChooseContinue());
             _resumeBreakBtn = BtnObj(host, "RESUME NEXT CONDITION", pos, wide, () => session.ResumeFromBreak());
             // Explore condition only — shares the row with END FREE-PLAY, the
             // same way BREAK/CONTINUE split it.
-            _nudgeBtn = BtnObj(host, "PLAY EXPLORE NUDGE", new Vector2(16, -178), new Vector2(205, 38), () => session.PlayExploreNudge());
-            _endFreePlayBtn = BtnObj(host, "END FREE-PLAY", new Vector2(233, -178), new Vector2(205, 38), () => session.EndFreePlay());
+            _nudgeBtn = BtnObj(host, "PLAY EXPLORE NUDGE", pos, half, () => session.PlayExploreNudge());
+            _endFreePlayBtn = BtnObj(host, "END FREE-PLAY", posRight, half, () => session.EndFreePlay());
 
             // The shortcut is on the button because a safety key nobody knows
             // about is not a safety key.
-            var estopImg = Btn(host, "EMERGENCY STOP   (F1)", new Vector2(16, -240), new Vector2(422, 46), () => session.EmergencyStop(), out _);
+            var estopSize = new Vector2(fullW, EstopRowH);
+            var estopImg = Btn(host, "EMERGENCY STOP   (F1)", new Vector2(inset, estopY), estopSize, () => session.EmergencyStop(), out _);
             _estopBtn = estopImg.GetComponent<Button>(); estopImg.color = _estop;
-            var resumeImg = Btn(host, "RESUME   (F1)", new Vector2(16, -240), new Vector2(422, 46), () => session.Resume(), out _);
+            var resumeImg = Btn(host, "RESUME   (F1)", new Vector2(inset, estopY), estopSize, () => session.Resume(), out _);
             _estopResumeBtn = resumeImg.GetComponent<Button>(); resumeImg.color = _btnSel;
-            _estopBanner = Txt(host, "STOPPED — platform returning", 12, _estop, new Vector2(16, -290), new Vector2(422, 18));
+            _estopBanner = Txt(host, "STOPPED — platform returning", 12, _estop,
+                               new Vector2(inset, bannerY), new Vector2(fullW, BannerH));
+            _estopBanner.alignment = TextAnchor.UpperCenter;
         }
 
-        // Left-column layout, each derived from the one above it so a height
-        // change here can't silently leave the next card overlapping —
-        // that already happened once by hand-matching two magic numbers.
-        private const float SessionCardY = -60, SessionCardH = 300;
-        private const float TrialCardY = SessionCardY - SessionCardH - 12, TrialCardH = 258;
-        private const float BaselineCardY = TrialCardY - TrialCardH - 8, BaselineCardH = 152;
+        // Row heights the session card's tail is built from, named so the Y
+        // chain above can be read as a stack rather than a list of literals.
+        private const float ActionRowH = 36f, EstopRowH = 44f, BannerH = 16f;
+
+        // ════════════════════════════════════════════════════════════════
+        //  DASHBOARD GEOMETRY — one place, all of it derived
+        //
+        //  The dashboard is authored against a FIXED 1920×1080 reference
+        //  (the canvas scaler maps that onto whatever the display really
+        //  is). Every edge below is derived from its neighbour rather than
+        //  hand-matched, because every layout bug this file has had came
+        //  from two literals that were supposed to agree and stopped
+        //  agreeing: a card grown without moving the one under it, a box
+        //  measured for a narrower grid than it packs. VerifyLayout() at
+        //  the end of BuildUI re-checks the arithmetic at runtime and says
+        //  so in the log if anything still lands on top of anything else.
+        // ════════════════════════════════════════════════════════════════
+        private const float CanvasW = 1920f, CanvasH = 1080f;
+        private const float EdgeMargin = 24f;
+        private const float TransportH = 132f, TransportBottomGap = 12f;
+        /// <summary>Top edge of the record/playback bar. Nothing in any
+        /// column may reach past this.</summary>
+        private const float TransportTopY = -(CanvasH - TransportH - TransportBottomGap);
+
+        /// <summary>Top edge of ALL THREE columns — everything below the
+        /// header/timeline band. One constant rather than three matching
+        /// literals: the timeline card sits above all of them, so changing
+        /// its height has to move the whole dashboard down together or the
+        /// columns slide underneath it.</summary>
+        private const float ColumnTopY = -(-TimelineY + TimelineH + 8f);
+
+        // Left column — each card's Y derived from the one above it so a
+        // height change here can't silently leave the next card overlapping.
+        // The heights are sized to what the cards actually DRAW: the trial
+        // card ends after its fourth parameter bar, and the baseline card is
+        // tall enough for a full twelve-channel readout, which at 152px it
+        // was not — the last channels simply spilled out of the bottom.
+        private const float LeftColX = EdgeMargin, LeftColW = 452f;
+        private const float SessionCardY = ColumnTopY, SessionCardH = 294;
+        private const float TrialCardY = SessionCardY - SessionCardH - 12, TrialCardH = 212;
+        private const float BaselineCardY = TrialCardY - TrialCardH - 8, BaselineCardH = 244;
 
         // Right-column layout (beside the Sensor Grid, GridX0) — Forces
         // gizmo, then Connections, then Event Log, top edge matching the
@@ -1162,28 +1522,41 @@ namespace Delphi
 
         private void BuildTrialCard(Transform root)
         {
+            const float inset = 16f, fullW = LeftColW - 2f * inset;
             var card = Card(root, "Trial Progress — driven by the session automatically",
-                new Vector2(24, TrialCardY), new Vector2(452, TrialCardH));
+                new Vector2(LeftColX, TrialCardY), new Vector2(LeftColW, TrialCardH));
             var host = card.transform;
-            _optDot = Dot(host, new Vector2(16, -32)); _optLabel = Txt(host, "optimizer: idle", 13, _pending, new Vector2(34, -30), new Vector2(404, 20));
-            _iterTxt = Txt(host, "iteration — / —", 14, _dim, new Vector2(16, -54), new Vector2(240, 22));
-            _hvTxt = Txt(host, "hypervolume  —", 14, _dim, new Vector2(210, -54), new Vector2(228, 22)); _hvTxt.alignment = TextAnchor.UpperRight;
+            _optDot = Dot(host, new Vector2(inset, -32));
+            _optLabel = Txt(host, "optimizer: idle", 13, _pending, new Vector2(inset + 18, -30), new Vector2(fullW - 18, 20));
+            _iterTxt = Txt(host, "iteration — / —", 14, _dim, new Vector2(inset, -54), new Vector2(210, 22));
+            _hvTxt = Txt(host, "hypervolume  —", 14, _dim, new Vector2(inset + 210, -54), new Vector2(fullW - 210, 22));
+            _hvTxt.alignment = TextAnchor.UpperRight;
 
-            _trackPosTxt = Txt(host, "Track: —", 13, _accent, new Vector2(16, -76), new Vector2(422, 20));
+            _trackPosTxt = Txt(host, "Track: —", 13, _accent, new Vector2(inset, -78), new Vector2(fullW, 20));
 
+            // Label / bar / value share one baseline per row: the value column
+            // is right-aligned against the card's inset so the four numbers line
+            // up under each other, which left-aligned in a 40px box they did not.
+            const float labelW = 96f, valueW = 44f, gap = 8f;
+            float paramBarW = fullW - labelW - valueW - 2f * gap;
             for (int i = 0; i < ParamLabels.Length; i++)
             {
-                float y = -106 - i * 24;
-                Txt(host, ParamLabels[i], 12, _dim, new Vector2(16, y), new Vector2(96, 20));
-                _paramBars[i] = Bar(host, new Vector2(116, y - 2), new Vector2(280, 14), _running);
-                _paramVals[i] = Txt(host, "0.50", 12, _dim, new Vector2(402, y), new Vector2(40, 20));
+                float y = -108 - i * 24;
+                Txt(host, ParamLabels[i], 12, _dim, new Vector2(inset, y), new Vector2(labelW, 20));
+                _paramBars[i] = Bar(host, new Vector2(inset + labelW + gap, y + 3), new Vector2(paramBarW, 14), _running);
+                _paramVals[i] = Txt(host, "0.50", 12, _dim,
+                                    new Vector2(inset + fullW - valueW, y), new Vector2(valueW, 20));
+                _paramVals[i].alignment = TextAnchor.UpperRight;
             }
         }
 
         private void BuildBaselineCard(Transform root)
         {
-            var card = Card(root, "Baseline — captured during the meditation", new Vector2(24, BaselineCardY), new Vector2(452, BaselineCardH));
-            _baselineText = Txt(card.transform, "No baseline captured yet.", 12, _dim, new Vector2(16, -32), new Vector2(422, BaselineCardH - 42));
+            const float inset = 16f;
+            var card = Card(root, "Baseline — captured during the meditation",
+                            new Vector2(LeftColX, BaselineCardY), new Vector2(LeftColW, BaselineCardH));
+            _baselineText = Txt(card.transform, "No baseline captured yet.", 12, _dim,
+                                new Vector2(inset, -34), new Vector2(LeftColW - 2f * inset, BaselineCardH - 44));
             _baselineText.alignment = TextAnchor.UpperLeft;
         }
 
@@ -1212,19 +1585,52 @@ namespace Delphi
             _baselineText.text = sb.ToString();
         }
 
+        // ── Centre and right column widths ──────────────────────────────
+        /// <summary>The scalar box's width. Fixed: the channel count only ever
+        /// changes how many ROWS it packs, never how many columns.</summary>
+        private float ScalarBoxW => GridCols * (_cellW + GridColGap) - GridColGap + 32f;
+
+        /// <summary>The centre column is as wide as its WIDER box, which is not
+        /// always the scalar one.
+        ///
+        /// This was a real collision, not a hypothetical: with the feed
+        /// spacing currently authored on this component the frame box comes
+        /// out 954px wide against the scalar box's 914, and the right column
+        /// was placed off the scalar width alone — so the camera feeds ran 40px
+        /// underneath the Forces/Connections cards.</summary>
+        private float CentreColW => Mathf.Max(ScalarBoxW, FrameBoxW);
+
         // EVENT LOG sits below BASELINE now, not directly below TRIAL.
         // Event Log lives to the right of the Sensor Grid — same top edge
-        // (GridY0), sized with the exact same box-width formula
-        // BuildSensorGrid uses for its own boxes (that formula is fixed —
-        // channel count only changes box HEIGHT there, not width).
-        private float RightColumnX => GridX0 + (GridCols * (_cellW + GridColGap) - GridColGap + 32f) + 24f;
+        // (GridY0), and starting clear of whichever sensor box is wider.
+        private float RightColumnX => GridX0 + CentreColW + EdgeMargin;
+
+        /// <summary>Whatever is left between the sensor grid and the right edge
+        /// of the screen, so a wide feed layout narrows this column instead of
+        /// pushing it off the display. Floored, because below about 320px the
+        /// connection lines stop fitting and a clipped status is worse than a
+        /// slightly overlapping one.</summary>
+        private float RightColW => Mathf.Clamp(CanvasW - EdgeMargin - RightColumnX, 320f, 452f);
+        private float RightInnerW => RightColW - 30f;
+
+        // The right column is the tallest of the three and now starts lower
+        // (the timeline band above it), so the log — the one card here whose
+        // height is a free choice rather than dictated by its contents — is
+        // what gives up the room, down to the LogLines it actually keeps.
+        private const float EventLogCardH = 232;
 
         private void BuildEventLog(Transform root)
         {
             float y = GridY0 - GizmoCardH - 12 - ConnectionsCardH - 12;
-            var card = Card(root, "Event Log", new Vector2(RightColumnX, y), new Vector2(452, 300));
-            _logText = Txt(card.transform, "", 12, _dim, new Vector2(16, -32), new Vector2(422, 258));
+            var card = Card(root, "Event Log", new Vector2(RightColumnX, y), new Vector2(RightColW, EventLogCardH));
+            _logText = Txt(card.transform, "", 12, _dim, new Vector2(16, -32),
+                           new Vector2(RightInnerW, EventLogCardH - 42));
             _logText.alignment = TextAnchor.UpperLeft;
+            // WRAP, not overflow. Every other Txt in this file is a short
+            // measured value that must never be re-flowed; a log line is
+            // free-form prose and the long ones were running straight out
+            // through the right-hand edge of the card and off the screen.
+            _logText.horizontalOverflow = HorizontalWrapMode.Wrap;
         }
 
         // ════════════════════════════════════════════════════════════════
@@ -1246,12 +1652,17 @@ namespace Delphi
 
         private void BuildForcesGizmo(Transform root)
         {
-            var card = Card(root, "Forces (commanded)", new Vector2(RightColumnX, GridY0), new Vector2(452, GizmoCardH));
+            var card = Card(root, "Forces (commanded)", new Vector2(RightColumnX, GridY0),
+                            new Vector2(RightColW, GizmoCardH));
             var host = card.transform;
 
+            // The crosshair and the compass split the card between them, so
+            // they stay evenly placed however wide the column ends up —
+            // hard-coded at 120/330 they drifted off-centre (and the compass
+            // ring off the right edge) the moment the column narrowed.
             float centerY = -(GizmoGraphicsH - CardHeaderH) / 2f - 6f;
-            _crosshairOrigin = new Vector2(120, centerY);
-            _compassOrigin = new Vector2(330, centerY);
+            _crosshairOrigin = new Vector2(RightColW * 0.27f, centerY);
+            _compassOrigin = new Vector2(RightColW * 0.73f, centerY);
 
             var pitchColor = new Color(0.95f, 0.3f, 0.3f);
             var rollColor = new Color(0.35f, 0.55f, 0.95f);
@@ -1299,7 +1710,9 @@ namespace Delphi
             var yawLabel = Txt(host, "YAW", 11, yawColor, _compassOrigin + new Vector2(-20, GizmoMaxLen + 16), new Vector2(70, 16));
             yawLabel.fontStyle = FontStyle.Bold;
 
-            _gizmoValuesTxt = Txt(host, "", 12, _dim, new Vector2(16, -(GizmoGraphicsH - CardHeaderH - 14)), new Vector2(420, 20));
+            _gizmoValuesTxt = Txt(host, "", 12, _dim,
+                                  new Vector2(16, -(GizmoGraphicsH - CardHeaderH - 14)),
+                                  new Vector2(RightInnerW, 20));
 
             BuildSpeedStrip(host);
         }
@@ -1313,7 +1726,8 @@ namespace Delphi
         //  from a bare speed number is impossible. CarDriver.Limiter names
         //  whichever term actually bound the target this frame.
         // ════════════════════════════════════════════════════════════════
-        private const float SpeedBarX = 16, SpeedBarW = 420;
+        private const float SpeedBarX = 16;
+        private float SpeedBarW => RightInnerW;
         private Text _speedBigTxt, _speedTargetTxt, _speedLimiterTxt;
         private Slider _speedBar;
         private Image _speedTargetTick;
@@ -1325,8 +1739,8 @@ namespace Delphi
             _speedBigTxt = Txt(host, "— km/h", 24, _accent, new Vector2(SpeedBarX, y + 2), new Vector2(150, 34));
             _speedBigTxt.fontStyle = FontStyle.Bold;
 
-            _speedTargetTxt = Txt(host, "", 12, _dim, new Vector2(168, y + 2), new Vector2(268, 18));
-            _speedLimiterTxt = Txt(host, "", 12, _dim, new Vector2(168, y - 14), new Vector2(268, 18));
+            _speedTargetTxt = Txt(host, "", 12, _dim, new Vector2(168, y + 2), new Vector2(RightColW - 184, 18));
+            _speedLimiterTxt = Txt(host, "", 12, _dim, new Vector2(168, y - 14), new Vector2(RightColW - 184, 18));
             _speedLimiterTxt.fontStyle = FontStyle.Bold;
 
             _speedBar = Bar(host, new Vector2(SpeedBarX, y - 36), new Vector2(SpeedBarW, 8), _accent);
@@ -1488,25 +1902,26 @@ namespace Delphi
         private void BuildConnectionsCard(Transform root)
         {
             float y = GridY0 - GizmoCardH - 12;
-            var card = Card(root, "Connections", new Vector2(RightColumnX, y), new Vector2(452, ConnectionsCardH));
+            var card = Card(root, "Connections", new Vector2(RightColumnX, y), new Vector2(RightColW, ConnectionsCardH));
             var host = card.transform;
+            float lineW = RightColW - 48f;   // clear of the dot column at x=16
 
             _connYawDot = Dot(host, new Vector2(16, -34));
-            _connYawTxt = Txt(host, "YAW VR3: —", 13, _dim, new Vector2(34, -30), new Vector2(404, 20));
-            _connYawCuesTxt = Txt(host, "", 11, _dim, new Vector2(34, -50), new Vector2(404, 16));
+            _connYawTxt = Txt(host, "YAW VR3: —", 13, _dim, new Vector2(34, -30), new Vector2(lineW, 20));
+            _connYawCuesTxt = Txt(host, "", 11, _dim, new Vector2(34, -50), new Vector2(lineW, 16));
 
             _connBoDot = Dot(host, new Vector2(16, -78));
-            _connBoTxt = Txt(host, "BO Hub: —", 13, _dim, new Vector2(34, -74), new Vector2(404, 20));
+            _connBoTxt = Txt(host, "BO Hub: —", 13, _dim, new Vector2(34, -74), new Vector2(lineW, 20));
 
             _connGsrDot = Dot(host, new Vector2(16, -102));
-            _connGsrTxt = Txt(host, "GSR: —", 13, _dim, new Vector2(34, -98), new Vector2(404, 20));
+            _connGsrTxt = Txt(host, "GSR: —", 13, _dim, new Vector2(34, -98), new Vector2(lineW, 20));
 
             _connPolarDot = Dot(host, new Vector2(16, -126));
-            _connPolarTxt = Txt(host, "Polar H10: —", 13, _dim, new Vector2(34, -122), new Vector2(404, 20));
+            _connPolarTxt = Txt(host, "Polar H10: —", 13, _dim, new Vector2(34, -122), new Vector2(lineW, 20));
 
-            _yawMotionImg = Btn(host, "START MOTION", new Vector2(16, -156), new Vector2(422, 32),
+            _yawMotionImg = Btn(host, "START MOTION", new Vector2(16, -156), new Vector2(RightInnerW, 32),
                 ToggleYawMotion, out _yawMotionTxt);
-            _yawRumbleImg = Btn(host, "RUMBLE: ON", new Vector2(16, -196), new Vector2(422, 24),
+            _yawRumbleImg = Btn(host, "RUMBLE: ON", new Vector2(16, -196), new Vector2(RightInnerW, 24),
                 ToggleYawRumble, out _yawRumbleTxt);
         }
 
@@ -1604,12 +2019,13 @@ namespace Delphi
         // The feed box is sized from the SAME expressions the cells pack with,
         // so widening the gaps grows the box instead of pushing feeds out
         // through its right edge.
-        private RectTransform _frameBoxRt, _frameHeaderRt;
-        private int FrameRowCount =>
-            Mathf.Max(1, Mathf.CeilToInt(DelphiManager.AllFrameChannels.Length / (float)FrameCols));
+        private RectTransform _scalarBoxRt, _scalarHeaderRt, _frameBoxRt, _frameHeaderRt;
+        // Rows each section is CURRENTLY packing — set by PackSection, which is
+        // the only thing that knows how many cells are actually visible.
+        private int _scalarRows = 1, _frameRows = 1;
         private float FrameBoxW => FrameCols * (FrameCellW + FrameGapH) - FrameGapH + 32f;
         private float FrameBoxH =>
-            CardHeaderH + FrameRowCount * FrameRowH + (FrameRowCount - 1) * FrameGapV + 16f;
+            CardHeaderH + _frameRows * FrameRowH + (_frameRows - 1) * FrameGapV + 16f;
 
         /// <summary>Two clearly separate, individually labelled boxes — one
         /// for scalar (physiological/behavioral) channels, one for camera
@@ -1620,14 +2036,15 @@ namespace Delphi
         {
             var scalar = DelphiManager.AllChannels; var frame = DelphiManager.AllFrameChannels;
 
-            int scalarRows = Mathf.Max(1, Mathf.CeilToInt(scalar.Length / (float)GridCols));
-            float boxW = GridCols * (_cellW + GridColGap) - GridColGap + 32f;
-            float scalarBoxH = CardHeaderH + scalarRows * GridRowH + (scalarRows - 1) * GridRowGap + 16f;
-
+            // Provisional sizes only — ResizeSensorBoxes fits both boxes to the
+            // rows that are genuinely in use as soon as the cells are packed,
+            // and again whenever the active set or the feed tuning changes.
             var scalarBox = Card(root, "Scalar Sensors — physiological & behavioral signals",
-                new Vector2(GridX0, GridY0), new Vector2(boxW, scalarBoxH));
+                new Vector2(GridX0, GridY0), new Vector2(ScalarBoxW, CardHeaderH + GridRowH + 16f),
+                out _scalarHeaderRt);
+            _scalarBoxRt = (RectTransform)scalarBox;
             var frameBox = Card(root, "Frame Sensors — camera / video feeds",
-                new Vector2(GridX0, GridY0 - scalarBoxH - 16f), new Vector2(FrameBoxW, FrameBoxH),
+                new Vector2(GridX0, GridY0), new Vector2(FrameBoxW, FrameBoxH),
                 out _frameHeaderRt);
             _frameBoxRt = (RectTransform)frameBox;
 
@@ -1727,32 +2144,57 @@ namespace Delphi
             return panel;
         }
 
+        /// <summary>Width of the transport bar in reference pixels. It stretches
+        /// to the canvas, but the canvas is always 1920 reference units wide,
+        /// so this is exact — and it lets the right-hand controls be placed
+        /// against the bar's far edge instead of being left in a heap on the
+        /// left with 900px of nothing beside them.</summary>
+        private const float TransportW = CanvasW - 2f * EdgeMargin;
+
         private void BuildTransport(Transform root)
         {
             var bar = NewImage(root, _card); var brt = bar.rectTransform;
             brt.anchorMin = new Vector2(0, 0); brt.anchorMax = new Vector2(1, 0); brt.pivot = new Vector2(0.5f, 0);
-            brt.anchoredPosition = new Vector2(0, 0); brt.sizeDelta = new Vector2(-40, 132); brt.anchoredPosition = new Vector2(0, 12);
+            // Same 24px margins as every column above it — at -40 the bar was
+            // 4px wider on each side than the cards it sits under, which is
+            // exactly the sort of not-quite-aligned edge you see without being
+            // able to say what's wrong.
+            brt.sizeDelta = new Vector2(-2f * EdgeMargin, TransportH);
+            brt.anchoredPosition = new Vector2(0, TransportBottomGap);
             var host = bar.transform;
 
-            _recImg = Btn(host, "REC", new Vector2(16, -12), new Vector2(84, 32), ToggleRecord, out _recTxt);
-            _nameField = Field(host, new Vector2(108, -12), new Vector2(260, 32), "Session name (optional)");
-            _recStatus = Txt(host, "idle", 15, _dim, new Vector2(380, -14), new Vector2(360, 28));
-            _quitImg = Btn(host, QuitIdleLabel, new Vector2(756, -12), new Vector2(180, 32),
+            const float inset = 16f, rowH = 32f;
+            float rightEdge = TransportW - inset;
+
+            // Row 1 — recording. QUIT sits at the far right, as far from REC as
+            // the bar allows: it ends the session and closes every encoder, and
+            // it used to sit two buttons away from the record toggle.
+            _recImg = Btn(host, "REC", new Vector2(inset, -12), new Vector2(84, rowH), ToggleRecord, out _recTxt);
+            _nameField = Field(host, new Vector2(inset + 92, -12), new Vector2(260, rowH), "Session name (optional)");
+            _recStatus = Txt(host, "idle", 15, _dim, new Vector2(inset + 364, -12), new Vector2(360, rowH));
+            _recStatus.alignment = TextAnchor.MiddleLeft;
+            _quitImg = Btn(host, QuitIdleLabel, new Vector2(rightEdge - 180, -12), new Vector2(180, rowH),
                            OnQuitClicked, out _quitTxt);
 
+            // Row 2 — playback. The elapsed/duration readout is right-aligned
+            // to the end of the scrubber below it, where the end of a timeline
+            // is: left-aligned mid-bar it read as another button label.
             float y = -52;
-            Btn(host, "<", new Vector2(16, y), new Vector2(32, 32), () => CycleSession(-1), out _);
-            _sessionLabel = Txt(host, "…", 15, _dim, new Vector2(52, y - 2), new Vector2(300, 32)); _sessionLabel.alignment = TextAnchor.MiddleCenter;
-            Btn(host, ">", new Vector2(356, y), new Vector2(32, 32), () => CycleSession(1), out _);
-            _loadBtn = Btn(host, "Load", new Vector2(396, y), new Vector2(76, 32), ToggleLoad, out _loadTxt).GetComponent<Button>();
-            _playBtn = Btn(host, "Play", new Vector2(482, y), new Vector2(76, 32), () => player?.TogglePlay(), out _playTxt).GetComponent<Button>();
-            _stepBackBtn = Btn(host, "-1f", new Vector2(566, y), new Vector2(48, 32), () => player?.StepFrames(-1), out _).GetComponent<Button>();
-            _stepFwdBtn = Btn(host, "+1f", new Vector2(618, y), new Vector2(48, 32), () => player?.StepFrames(1), out _).GetComponent<Button>();
-            _speedBtn = Btn(host, "1x", new Vector2(674, y), new Vector2(58, 32),
+            float x = inset;
+            Btn(host, "<", new Vector2(x, y), new Vector2(32, rowH), () => CycleSession(-1), out _); x += 36;
+            _sessionLabel = Txt(host, "…", 15, _dim, new Vector2(x, y), new Vector2(300, rowH));
+            _sessionLabel.alignment = TextAnchor.MiddleCenter; x += 304;
+            Btn(host, ">", new Vector2(x, y), new Vector2(32, rowH), () => CycleSession(1), out _); x += 40;
+            _loadBtn = Btn(host, "Load", new Vector2(x, y), new Vector2(76, rowH), ToggleLoad, out _loadTxt).GetComponent<Button>(); x += 86;
+            _playBtn = Btn(host, "Play", new Vector2(x, y), new Vector2(76, rowH), () => player?.TogglePlay(), out _playTxt).GetComponent<Button>(); x += 84;
+            _stepBackBtn = Btn(host, "-1f", new Vector2(x, y), new Vector2(48, rowH), () => player?.StepFrames(-1), out _).GetComponent<Button>(); x += 52;
+            _stepFwdBtn = Btn(host, "+1f", new Vector2(x, y), new Vector2(48, rowH), () => player?.StepFrames(1), out _).GetComponent<Button>(); x += 56;
+            _speedBtn = Btn(host, "1x", new Vector2(x, y), new Vector2(58, rowH),
                 () => CycleSpeed(_speedIdx >= Speeds.Length - 1 ? -(Speeds.Length - 1) : 1), out _speedTxt).GetComponent<Button>();
-            _timeLabel = Txt(host, "--:-- / --:--", 15, _dim, new Vector2(742, y - 2), new Vector2(240, 32)); _timeLabel.alignment = TextAnchor.MiddleLeft;
+            _timeLabel = Txt(host, "--:-- / --:--", 15, _dim, new Vector2(rightEdge - 240, y), new Vector2(240, rowH));
+            _timeLabel.alignment = TextAnchor.MiddleRight;
 
-            _scrubber = Scrub(host, new Vector2(16, -96), new Vector2(-32, 22));
+            _scrubber = Scrub(host, new Vector2(inset, -96), new Vector2(-2f * inset, 22));
             _scrubber.onValueChanged.AddListener(v => { if (player != null && player.IsLoaded) { _scrubbing = true; player.Seek(v * player.Duration); _scrubbing = false; } });
         }
 
