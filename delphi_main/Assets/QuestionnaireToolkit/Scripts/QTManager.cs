@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 #if UNITY_EDITOR
@@ -130,7 +130,7 @@ namespace QuestionnaireToolkit.Scripts
                 }
                 
                 // add a new EventSystem if needed
-                if (FindObjectOfType<EventSystem>() == null)
+                if (FindAnyObjectByType<EventSystem>() == null)
                 {
                     var o = new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
                 }

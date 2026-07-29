@@ -64,8 +64,8 @@ namespace Delphi.Session
 
         private void Start()
         {
-            if (car == null) car = FindFirstObjectByType<CarDriver>();
-            if (track == null) track = FindFirstObjectByType<Track>();
+            if (car == null) car = FindAnyObjectByType<CarDriver>();
+            if (track == null) track = FindAnyObjectByType<Track>();
             if (overviewCamera == null)
                 foreach (var c in Camera.allCameras)
                     if (c.name == "Track Overview Camera") overviewCamera = c;

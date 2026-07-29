@@ -46,7 +46,7 @@ namespace BOforUnity.Scripts
             if (targetButton) targetButton.gameObject.SetActive(false);
             if (clickTimes == null) clickTimes = new List<float>();
 
-            boManager = FindObjectOfType<BoForUnityManager>();
+            boManager = FindAnyObjectByType<BoForUnityManager>();
 
             StartCoroutine(StartGame());
         }

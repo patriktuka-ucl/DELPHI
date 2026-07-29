@@ -64,8 +64,8 @@ namespace Delphi.VR
 
         private void Start()
         {
-            if (manager == null) manager = FindFirstObjectByType<DelphiManager>();
-            if (session == null) session = FindFirstObjectByType<Delphi.Session.SessionController>();
+            if (manager == null) manager = FindAnyObjectByType<DelphiManager>();
+            if (session == null) session = FindAnyObjectByType<Delphi.Session.SessionController>();
 
             var rig = VrRig.Instance;
             if (rig == null || !rig.IsActive || rig.SeatReference == null)

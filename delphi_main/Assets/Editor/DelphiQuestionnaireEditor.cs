@@ -149,7 +149,7 @@ namespace Delphi.EditorTools
         /// that would tell you that.</summary>
         private static void DrawRoleBanner(DelphiQuestionnaire q)
         {
-            var session = Object.FindFirstObjectByType<SessionController>();
+            var session = Object.FindAnyObjectByType<SessionController>();
             string role =
                 session == null                              ? null :
                 session.delphiQuestionnaire == q             ? "PER-TRIAL questionnaire (Explicit condition). Shown after every measured iteration; each item below is one optimizer objective." :

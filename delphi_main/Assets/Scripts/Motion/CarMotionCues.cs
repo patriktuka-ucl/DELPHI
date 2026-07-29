@@ -197,7 +197,7 @@ namespace Delphi.Motion
 
         private void Awake()
         {
-            if (car == null) car = FindFirstObjectByType<CarDriver>();
+            if (car == null) car = FindAnyObjectByType<CarDriver>();
             EnsureReferenceTransform();
         }
 

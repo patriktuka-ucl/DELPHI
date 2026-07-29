@@ -1140,7 +1140,7 @@ namespace BOforUnity.Examples
             label.color = targetXColor;
             label.fontSize = xFontSizePixels;
             label.fontStyle = FontStyles.Bold;
-            label.enableWordWrapping = false;
+            label.textWrappingMode = TextWrappingModes.NoWrap;
             label.raycastTarget = false;
             return label;
         }
@@ -1420,7 +1420,7 @@ namespace BOforUnity.Examples
             if (questionnaireToolkitManager != null)
                 return questionnaireToolkitManager;
 
-            QTQuestionnaireManager[] managers = FindObjectsOfType<QTQuestionnaireManager>();
+            QTQuestionnaireManager[] managers = FindObjectsByType<QTQuestionnaireManager>();
             if (managers == null || managers.Length == 0)
                 return null;
 
@@ -1930,7 +1930,7 @@ namespace BOforUnity.Examples
             if (string.Equals(objectiveKey, accuracyObjectiveKey, StringComparison.Ordinal))
                 return FormatCsvFloat(accuracyDistancePixels);
 
-            FittsLawConditionManager conditionManager = FindObjectOfType<FittsLawConditionManager>();
+            FittsLawConditionManager conditionManager = FindAnyObjectByType<FittsLawConditionManager>();
             if (conditionManager != null && conditionManager.TryGetObjectiveAverage(objectiveKey, out float conditionObjectiveValue))
                 return FormatCsvFloat(conditionObjectiveValue);
 
@@ -2135,7 +2135,7 @@ namespace BOforUnity.Examples
 
         private static BoForUnityManager FindPreferredBoManager()
         {
-            BoForUnityManager[] managers = FindObjectsOfType<BoForUnityManager>();
+            BoForUnityManager[] managers = FindObjectsByType<BoForUnityManager>();
             if (managers == null || managers.Length == 0)
                 return null;
 
@@ -2276,7 +2276,7 @@ namespace BOforUnity.Examples
 
         private static void EnsureEventSystem()
         {
-            if (FindObjectOfType<EventSystem>() != null)
+            if (FindAnyObjectByType<EventSystem>() != null)
                 return;
 
             GameObject eventSystemObject = new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));

@@ -123,11 +123,11 @@ namespace Delphi
 
         private void Start()
         {
-            if (manager == null)  manager  = FindFirstObjectByType<DelphiManager>();
-            if (session == null)  session  = FindFirstObjectByType<SessionController>();
-            if (recorder == null) recorder = FindFirstObjectByType<SessionRecorder>();
-            if (player == null)   player   = FindFirstObjectByType<SessionPlayer>();
-            if (overviewIndicators == null) overviewIndicators = FindFirstObjectByType<OverviewIndicators>();
+            if (manager == null)  manager  = FindAnyObjectByType<DelphiManager>();
+            if (session == null)  session  = FindAnyObjectByType<SessionController>();
+            if (recorder == null) recorder = FindAnyObjectByType<SessionRecorder>();
+            if (player == null)   player   = FindAnyObjectByType<SessionPlayer>();
+            if (overviewIndicators == null) overviewIndicators = FindAnyObjectByType<OverviewIndicators>();
             if (manager == null) { Debug.LogError("[ExperimentUI] No DelphiManager."); enabled = false; return; }
 
             _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
@@ -366,7 +366,7 @@ namespace Delphi
             // is ready depending on scene load order, and a null reference
             // here would otherwise silently disable the sliders for the rest
             // of the session.
-            if (overviewIndicators == null) overviewIndicators = FindFirstObjectByType<OverviewIndicators>();
+            if (overviewIndicators == null) overviewIndicators = FindAnyObjectByType<OverviewIndicators>();
             if (overviewIndicators == null) return;
             if (Mathf.Approximately(overheadBallSize, _lastOverheadBallSize) &&
                 Mathf.Approximately(overheadRouteWidth, _lastOverheadRouteWidth))
@@ -1518,7 +1518,12 @@ namespace Delphi
         // GizmoCardH, so the whole right column reflows on its own.
         private const float GizmoGraphicsH = 220;
         private const float SpeedStripH = 52;
-        private const float GizmoCardH = GizmoGraphicsH + SpeedStripH, ConnectionsCardH = 240;
+        // 248, not 240: the YAW block grew a second readout line when rumble
+        // became an independent cue channel with its own three-pad state.
+        // The extra 8 is all the right column had left — VerifyLayout()'s
+        // "right" check is 8px from warning at this height, so anything else
+        // added to this card has to buy its space back from inside it.
+        private const float GizmoCardH = GizmoGraphicsH + SpeedStripH, ConnectionsCardH = 248;
 
         private void BuildTrialCard(Transform root)
         {
@@ -1804,7 +1809,7 @@ namespace Delphi
             RefreshSpeedStrip();
 
             var yaw = YawVR3Connection.Instance;
-            var cues = yaw != null && yaw.cues != null ? yaw.cues : FindFirstObjectByType<CarMotionCues>();
+            var cues = yaw != null && yaw.cues != null ? yaw.cues : FindAnyObjectByType<CarMotionCues>();
 
             if (cues == null)
             {
@@ -1895,9 +1900,9 @@ namespace Delphi
         //  Connected-not-Started.
         // ════════════════════════════════════════════════════════════════
         private Image _connYawDot, _connBoDot, _connGsrDot, _connPolarDot;
-        private Text _connYawTxt, _connYawCuesTxt, _connBoTxt, _connGsrTxt, _connPolarTxt;
-        private Text _yawMotionTxt, _yawRumbleTxt;
-        private Image _yawMotionImg, _yawRumbleImg;
+        private Text _connYawTxt, _connYawCuesTxt, _connYawRumbleTxt, _connBoTxt, _connGsrTxt, _connPolarTxt;
+        private Text _yawMotionTxt, _yawTiltTxt, _yawRumbleTxt;
+        private Image _yawMotionImg, _yawTiltImg, _yawRumbleImg;
 
         private void BuildConnectionsCard(Transform root)
         {
@@ -1908,20 +1913,34 @@ namespace Delphi
 
             _connYawDot = Dot(host, new Vector2(16, -34));
             _connYawTxt = Txt(host, "YAW VR3: —", 13, _dim, new Vector2(34, -30), new Vector2(lineW, 20));
-            _connYawCuesTxt = Txt(host, "", 11, _dim, new Vector2(34, -50), new Vector2(lineW, 16));
+            // Two readouts, one per cue channel — they are independent, so
+            // reading one tells you nothing about the other.
+            // 15px lines, not 16: the second readout had to fit in the 8px the
+            // column had spare plus what the two lines could give back.
+            _connYawCuesTxt = Txt(host, "", 11, _dim, new Vector2(34, -50), new Vector2(lineW, 15));
+            _connYawRumbleTxt = Txt(host, "", 11, _dim, new Vector2(34, -65), new Vector2(lineW, 15));
 
-            _connBoDot = Dot(host, new Vector2(16, -78));
-            _connBoTxt = Txt(host, "BO Hub: —", 13, _dim, new Vector2(34, -74), new Vector2(lineW, 20));
+            _connBoDot = Dot(host, new Vector2(16, -92));
+            _connBoTxt = Txt(host, "BO Hub: —", 13, _dim, new Vector2(34, -88), new Vector2(lineW, 20));
 
-            _connGsrDot = Dot(host, new Vector2(16, -102));
-            _connGsrTxt = Txt(host, "GSR: —", 13, _dim, new Vector2(34, -98), new Vector2(lineW, 20));
+            _connGsrDot = Dot(host, new Vector2(16, -116));
+            _connGsrTxt = Txt(host, "GSR: —", 13, _dim, new Vector2(34, -112), new Vector2(lineW, 20));
 
-            _connPolarDot = Dot(host, new Vector2(16, -126));
-            _connPolarTxt = Txt(host, "Polar H10: —", 13, _dim, new Vector2(34, -122), new Vector2(lineW, 20));
+            _connPolarDot = Dot(host, new Vector2(16, -140));
+            _connPolarTxt = Txt(host, "Polar H10: —", 13, _dim, new Vector2(34, -136), new Vector2(lineW, 20));
 
-            _yawMotionImg = Btn(host, "START MOTION", new Vector2(16, -156), new Vector2(RightInnerW, 32),
+            // START is the transport — it powers the rig and is what the two
+            // buttons under it need in order to reach anything. TILT and
+            // RUMBLE are the two independent cue channels riding on it, so
+            // they sit side by side on one row below it rather than looking
+            // like a sequence.
+            _yawMotionImg = Btn(host, "START MOTION", new Vector2(16, -168), new Vector2(RightInnerW, 30),
                 ToggleYawMotion, out _yawMotionTxt);
-            _yawRumbleImg = Btn(host, "RUMBLE: ON", new Vector2(16, -196), new Vector2(RightInnerW, 24),
+
+            float halfW = (RightInnerW - 8f) / 2f;
+            _yawTiltImg = Btn(host, "TILT: ON", new Vector2(16, -204), new Vector2(halfW, 24),
+                ToggleYawTilt, out _yawTiltTxt);
+            _yawRumbleImg = Btn(host, "RUMBLE: ON", new Vector2(16 + halfW + 8f, -204), new Vector2(halfW, 24),
                 ToggleYawRumble, out _yawRumbleTxt);
         }
 
@@ -1931,6 +1950,12 @@ namespace Delphi
             if (yaw == null) return;
             if (yaw.State == YawConnectionState.Connected) yaw.StartMotion();
             else if (yaw.State == YawConnectionState.Started) yaw.StopMotion();
+        }
+
+        private void ToggleYawTilt()
+        {
+            var yaw = YawVR3Connection.Instance;
+            if (yaw != null) yaw.tiltEnabled = !yaw.tiltEnabled;
         }
 
         private void ToggleYawRumble()
@@ -1949,7 +1974,10 @@ namespace Delphi
                 _connYawTxt.text = "YAW VR3: not present in scene";
                 _connYawTxt.color = _connYawDot.color = _dim;
                 _connYawCuesTxt.text = "";
+                _connYawRumbleTxt.text = "";
                 motionBtn.interactable = false;
+                _yawTiltImg.GetComponent<Button>().interactable = false;
+                _yawRumbleImg.GetComponent<Button>().interactable = false;
             }
             else
             {
@@ -1965,10 +1993,20 @@ namespace Delphi
                 _connYawTxt.color = _connYawDot.color = yawColor;
 
                 var cues = yaw.cues;
-                _connYawCuesTxt.text = cues != null
-                    ? $"cues — pitch {cues.PitchDeg:0.#}°  roll {cues.RollDeg:0.#}°  " +
+                var rum = yaw.rumble;
+                // One readout, both channels: tilt in degrees, rumble as the
+                // three pad intensities actually on the wire. Reading them
+                // together is the only way to tell at a glance which of the
+                // two the participant is currently getting.
+                string tiltLine = cues != null
+                    ? $"tilt — pitch {cues.PitchDeg:0.#}°  roll {cues.RollDeg:0.#}°  " +
                       $"(accel {cues.AccelMs2:0.00} m/s²  turn {cues.YawRateDegPerSec:0.0}°/s)"
-                    : "cues — no CarMotionCues found";
+                    : "tilt — no CarMotionCues found";
+                _connYawCuesTxt.text = tiltLine;
+                _connYawRumbleTxt.text = rum != null
+                    ? $"rumble — pads {yaw.SentRumbleRight}/{yaw.SentRumbleCentre}/{yaw.SentRumbleLeft} " +
+                      $"@ {yaw.SentRumbleHz} Hz  ({(rum.IsSilent ? "silent" : "active")})"
+                    : "rumble — no CarRumbleCues found";
 
                 bool canStart = yaw.State == YawConnectionState.Connected;
                 bool canStop = yaw.State == YawConnectionState.Started;
@@ -1976,6 +2014,15 @@ namespace Delphi
                 _yawMotionTxt.text = canStop ? "STOP MOTION" : "START MOTION";
                 _yawMotionImg.color = canStop ? _estop : (canStart ? _btnSel : _btn);
 
+                // Both channels stay togglable regardless of connection state —
+                // they're a configuration of what the rig WOULD send, and
+                // setting up the condition before starting the rig is the
+                // normal order of operations, not an error.
+                _yawTiltImg.GetComponent<Button>().interactable = true;
+                _yawRumbleImg.GetComponent<Button>().interactable = true;
+
+                _yawTiltTxt.text = yaw.tiltEnabled ? "TILT: ON" : "TILT: OFF";
+                _yawTiltImg.color = yaw.tiltEnabled ? _btnSel : _btn;
                 _yawRumbleTxt.text = yaw.rumbleEnabled ? "RUMBLE: ON" : "RUMBLE: OFF";
                 _yawRumbleImg.color = yaw.rumbleEnabled ? _btnSel : _btn;
             }

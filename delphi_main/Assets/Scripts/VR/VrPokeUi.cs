@@ -99,7 +99,7 @@ namespace Delphi.VR
         /// canvases because they share their root's plane.</summary>
         private void RescanTargets()
         {
-            var all = FindObjectsByType<Canvas>(FindObjectsSortMode.None);
+            var all = FindObjectsByType<Canvas>();
             if (_targets.Length < all.Length)
             {
                 _targets = new Canvas[all.Length];
@@ -123,7 +123,7 @@ namespace Delphi.VR
         {
             if (provider == null)
             {
-                var ht = FindFirstObjectByType<VrHandTracking>();
+                var ht = FindAnyObjectByType<VrHandTracking>();
                 if (ht != null) provider = ht.Provider;
             }
 

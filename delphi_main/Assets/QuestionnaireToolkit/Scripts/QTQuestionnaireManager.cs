@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -10,6 +10,7 @@ using QuestionnaireToolkit.Scripts.StandaloneFileBrowser;
 using TMPro;
 #if UNITY_EDITOR
 using UnityEditor;
+using UnityEditor.Build; // NamedBuildTarget, for the define-symbol API
 #endif
  using UnityEngine;
 using UnityEngine.Events;
@@ -550,7 +551,7 @@ namespace QuestionnaireToolkit.Scripts
                     // ignored
                 }
                 // add a new EventSystem if needed
-                if (FindObjectOfType<EventSystem>() == null)
+                if (FindAnyObjectByType<EventSystem>() == null)
                 {
                     var o = new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
                 }
@@ -994,7 +995,11 @@ namespace QuestionnaireToolkit.Scripts
                                     float.Parse(cc[2], CultureInfo.InvariantCulture),
                                     float.Parse(cc[3].Trim(')'), CultureInfo.InvariantCulture));
                                 elem.alignment = (TextAlignmentOptions) Enum.Parse( typeof(TextAlignmentOptions), qItems[j]["alignment"].Value );
-                                elem.enableWordWrapping = qItems[j]["word_wrapping"].AsBool;
+                                // Was elem.enableWordWrapping. TMP's obsolete shim mapped the
+                                // bool to exactly these two modes, so the JSON stays compatible.
+                                elem.textWrappingMode = qItems[j]["word_wrapping"].AsBool
+                                    ? TextWrappingModes.Normal
+                                    : TextWrappingModes.NoWrap;
                                 elem.overflowMode = (TextOverflowModes) Enum.Parse( typeof(TextOverflowModes), qItems[j]["overflow_mode"].Value );
                                 elem.horizontalMapping = (TextureMappingOptions) Enum.Parse( typeof(TextureMappingOptions), qItems[j]["horizontal_mapping"].Value );
                                 elem.verticalMapping = (TextureMappingOptions) Enum.Parse( typeof(TextureMappingOptions), qItems[j]["vertical_mapping"].Value );
@@ -1189,7 +1194,7 @@ namespace QuestionnaireToolkit.Scripts
                                           + "\"line_spacing\":\"" + child.lineSpacing + "\","
                                           + "\"color\":\"" + child.color + "\","
                                           + "\"alignment\":\"" + child.alignment + "\","
-                                          + "\"word_wrapping\":\"" + child.enableWordWrapping + "\","
+                                          + "\"word_wrapping\":\"" + (child.textWrappingMode == TextWrappingModes.Normal) + "\","
                                           + "\"overflow_mode\":\"" + child.overflowMode + "\","
                                           + "\"horizontal_mapping\":\"" + child.horizontalMapping + "\","
                                           + "\"vertical_mapping\":\"" + child.verticalMapping + "\"},";
@@ -1709,7 +1714,7 @@ namespace QuestionnaireToolkit.Scripts
             }
 
             _cachedOptimizationBridge = null;
-            foreach (var behaviour in FindObjectsOfType<MonoBehaviour>())
+            foreach (var behaviour in FindObjectsByType<MonoBehaviour>())
             {
                 if (IsActiveSceneBridge(behaviour) && behaviour is IQuestionnaireOptimizationBridge bridge)
                 {
@@ -3313,7 +3318,8 @@ namespace QuestionnaireToolkit.Scripts
         {
             // Get selected target defines.
             BuildTargetGroup buildTargetGroup = EditorUserBuildSettings.selectedBuildTargetGroup;
-            string defines = PlayerSettings.GetScriptingDefineSymbolsForGroup(buildTargetGroup);
+            NamedBuildTarget namedBuildTarget = NamedBuildTarget.FromBuildTargetGroup(buildTargetGroup);
+            string defines = PlayerSettings.GetScriptingDefineSymbols(namedBuildTarget);
             
             foreach (var d in toRemove)
             {
@@ -3324,14 +3330,14 @@ namespace QuestionnaireToolkit.Scripts
             if (define.Equals("Other") || defines.Contains(define))
             {
                 // Overwrite defines
-                PlayerSettings.SetScriptingDefineSymbolsForGroup(buildTargetGroup, (defines));
+                PlayerSettings.SetScriptingDefineSymbols(namedBuildTarget, (defines));
             }
             else if (define.Equals("HTC_Vive"))
             {
                 if (File.Exists("Assets/HTC.UnityPlugin/Pointer3D/RaycastMethod/CanvasRaycastTarget.cs"))
                 {
                     // Append.
-                    PlayerSettings.SetScriptingDefineSymbolsForGroup(buildTargetGroup, (defines + ";" + define));
+                    PlayerSettings.SetScriptingDefineSymbols(namedBuildTarget, (defines + ";" + define));
                 }
                 else
                 {
@@ -3344,7 +3350,7 @@ namespace QuestionnaireToolkit.Scripts
                 if (File.Exists("Assets/Oculus/VR/Scripts/Util/OVRRaycaster.cs"))
                 {
                     // Append.
-                    PlayerSettings.SetScriptingDefineSymbolsForGroup(buildTargetGroup, (defines + ";" + define));
+                    PlayerSettings.SetScriptingDefineSymbols(namedBuildTarget, (defines + ";" + define));
                 }
                 else
                 {

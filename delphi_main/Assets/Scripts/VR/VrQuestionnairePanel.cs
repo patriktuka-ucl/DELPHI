@@ -161,7 +161,7 @@ namespace Delphi.VR
         /// the panel simply is not built on desktop.</summary>
         public Transform ResolveAnchor()
         {
-            var rig = VrRig.Instance != null ? VrRig.Instance : FindFirstObjectByType<VrRig>();
+            var rig = VrRig.Instance != null ? VrRig.Instance : FindAnyObjectByType<VrRig>();
             if (rig == null) return null;
             if (rig.IsActive && rig.SeatReference != null) return rig.SeatReference;
             return rig.participantCamera != null ? rig.participantCamera.transform : null;

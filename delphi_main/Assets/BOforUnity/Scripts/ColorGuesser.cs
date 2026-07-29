@@ -20,7 +20,7 @@ public class ColorGuesser : MonoBehaviour
 
     private IEnumerator GuessingRoutine()
     {
-        boManager = FindObjectOfType<BoForUnityManager>();
+        boManager = FindAnyObjectByType<BoForUnityManager>();
 
         float r = 0.5f, g = 0.5f, b = 0.5f;
         if (!TryGetNormalizedParameterByIndex(0, out r) ||

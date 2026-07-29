@@ -6,7 +6,6 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using UnityEngine;
-using Delphi.Simulation;
 
 namespace Delphi.Motion
 {
@@ -65,16 +64,38 @@ namespace Delphi.Motion
         }
 
         [Header("Links (auto-found if left empty)")]
+        [Tooltip("Source of the tilt cue.")]
         public CarMotionCues cues;
-        public CarDriver car;
+        [Tooltip("Source of the rumble cue. Independent of `cues` — either can " +
+                 "be absent and the other still works. Without this, rumble " +
+                 "has no model and the vibration field is sent as zeros.")]
+        public CarRumbleCues rumble;
 
-        [Header("Rumble / haptic buzzer — subtle idle+road hum, modern-car feel")]
+        [Header("Output modes — TILT and RUMBLE are two completely " +
+                 "independent cue channels sharing one packet. Either, both, " +
+                 "or neither. Note that the rig must still be STARTED for " +
+                 "either to reach it: the vibration field rides inside the " +
+                 "motion packet, which only goes out while Started, and " +
+                 "Started is also the hardware's own 'powered and holding' " +
+                 "gate. So Start is the transport; these two are the content.")]
+        [Tooltip("Off = the rig is sent level angles (0/0/0) and stays still, " +
+                 "while CarMotionCues keeps computing and logging exactly as " +
+                 "normal. This is what makes rumble-only mode possible.")]
+        public bool tiltEnabled = true;
+        [Tooltip("Off = the vibration field is sent as zeros. CarRumbleCues " +
+                 "keeps modelling, it just isn't transported.")]
         public bool rumbleEnabled = true;
-        [Range(0, 100)] public int rumbleBaseIntensity = 4;
-        [Tooltip("Extra intensity per km/h of speed — keep small for a quiet modern car.")]
-        public float rumbleSpeedScale = 0.15f;
-        [Range(0, 100)] public int rumbleMaxIntensity = 30;
-        public int rumbleHz = 45;
+        [Tooltip("How long the seat takes to ease to level when tilt is " +
+                 "switched off mid-drive (and to pick the cue back up when " +
+                 "it's switched on). Never instant — the rig slews to whatever " +
+                 "angle it is sent as fast as it physically can, so a bare " +
+                 "toggle would be a lurch.")]
+        [Range(0.05f, 5f)] public float tiltTransitionSeconds = 0.8f;
+        [Tooltip("Frequency sent while there is nothing to say — no rumble " +
+                 "model in the scene, or rumble switched off. Intensity is " +
+                 "zero in those cases, so this is inaudible either way; it " +
+                 "exists only so the field is never garbage.")]
+        public int idleRumbleHz = 40;
 
         [Header("Discovery")]
         [Tooltip("How often to re-broadcast the discovery ping while no device has been found, in seconds.")]
@@ -120,8 +141,13 @@ namespace Delphi.Motion
             }
             Instance = this;
 
-            if (cues == null) cues = FindFirstObjectByType<CarMotionCues>();
-            if (car == null) car = FindFirstObjectByType<CarDriver>();
+            if (cues == null) cues = FindAnyObjectByType<CarMotionCues>();
+            if (rumble == null) rumble = FindAnyObjectByType<CarRumbleCues>();
+
+            // Start already faded in/out to match whatever the toggle says, so
+            // a scene saved with tilt off doesn't spend the first second
+            // ramping down from a lean it never had.
+            _tiltBlend = tiltEnabled ? 1f : 0f;
 
             // Defensive: if this component gets re-Awake()'d without
             // OnDestroy having run in between — Enter Play Mode Options with
@@ -407,6 +433,41 @@ namespace Delphi.Motion
         /// <summary>Hand control back to CarMotionCues.</summary>
         public void ClearManualOverride() => _manualOverride = null;
 
+        // Manual rumble — the tester's bench. Deliberately overrides BOTH the
+        // model and rumbleEnabled: the whole point of the bench is to drive a
+        // single pad at a known intensity with the model out of the way, and
+        // having to remember to switch rumble on first would just be a trap.
+        private (int r, int c, int l, int hz)? _manualRumble;
+
+        /// <summary>Drive the three pads directly, bypassing CarRumbleCues and
+        /// the rumbleEnabled switch. For YawVR3Tester's rumble bench — this is
+        /// how minEffectiveIntensity and the usable Hz range get MEASURED
+        /// rather than guessed. Not used anywhere in the normal driving
+        /// path.</summary>
+        public void SetManualRumble(int right, int centre, int left, int hz) =>
+            _manualRumble = (Mathf.Clamp(right, 0, 100), Mathf.Clamp(centre, 0, 100),
+                             Mathf.Clamp(left, 0, 100), Mathf.Clamp(hz, 0, 255));
+
+        /// <summary>Hand the vibration field back to CarRumbleCues.</summary>
+        public void ClearManualRumble() => _manualRumble = null;
+
+        public bool HasManualRumble => _manualRumble.HasValue;
+
+        /// <summary>How far tilt is faded in, 0-1. 1 = full cue, 0 = level.
+        /// Exposed so the UI can show a switch mid-transition rather than
+        /// claiming it has already taken effect.</summary>
+        public float TiltBlend => _tiltBlend;
+
+        // ── What actually went on the wire last tick — for the tester
+        //    readout and the researcher UI. These are the transported values,
+        //    which is not the same thing as what the model asked for.
+        public int SentRumbleRight { get; private set; }
+        public int SentRumbleCentre { get; private set; }
+        public int SentRumbleLeft { get; private set; }
+        public int SentRumbleHz { get; private set; }
+
+        private float _tiltBlend = 1f;
+
         // ── Motion tick — UDP, only while Started ────────────────────────
         private void SendMotionTick()
         {
@@ -415,6 +476,14 @@ namespace Delphi.Motion
             // a per-frame delta would under-ramp the manual-test smoothing.
             float sendDt = _lastMotionSendTime > 0f ? Time.unscaledTime - _lastMotionSendTime : 0f;
             _lastMotionSendTime = Time.unscaledTime;
+
+            // Tilt fade. A blend rather than a second servo: scaling the
+            // commanded angles toward zero converges on EXACTLY level with no
+            // state of its own to go stale, and it takes yaw with it, so
+            // switching tilt off also unwinds the rig back to home heading
+            // instead of leaving it parked wherever the last corner left it.
+            _tiltBlend = Mathf.MoveTowards(_tiltBlend, tiltEnabled ? 1f : 0f,
+                                           sendDt / Mathf.Max(0.05f, tiltTransitionSeconds));
 
             float yaw = 0f, pitch = 0f, roll = 0f;
             if (_manualOverride.HasValue)
@@ -436,9 +505,11 @@ namespace Delphi.Motion
                 // yaw accumulating through a corner the pitch/roll convention
                 // could flip mid-drive. The transform is still written, purely
                 // for the Scene view and the researcher UI.
-                pitch = cues.PitchDeg;
-                yaw = cues.YawDeg;
-                roll = -cues.RollDeg;   // same sign convention the transform used
+                // Scaled by the tilt fade — at 0 this is a hard level 0/0/0,
+                // which is exactly what rumble-only mode needs to send.
+                pitch = cues.PitchDeg * _tiltBlend;
+                yaw = cues.YawDeg * _tiltBlend;
+                roll = -cues.RollDeg * _tiltBlend;   // same sign convention the transform used
             }
 
             // Quantise to the resolution the wire actually carries (FormatRotation
@@ -448,13 +519,32 @@ namespace Delphi.Motion
             pitch = Deadband(pitch, ref _sentPitch);
             roll = Deadband(roll, ref _sentRoll);
 
-            int buzz = 0;
-            if (rumbleEnabled && car != null)
-                buzz = Mathf.Clamp(Mathf.RoundToInt(rumbleBaseIntensity + rumbleSpeedScale * car.CurrentSpeedKmh),
-                                    0, rumbleMaxIntensity);
+            // ── Vibration — the second, independent cue channel ──────────
+            // Three separate pads and a frequency, all modelled by
+            // CarRumbleCues; this end only transports them. Sending explicit
+            // zeros when rumble is off matters: the rig holds the last
+            // vibration command it was given, so simply omitting the update
+            // would leave the pads running.
+            int right = 0, centre = 0, left = 0, hz = idleRumbleHz;
+            if (_manualRumble.HasValue)
+            {
+                (right, centre, left, hz) = _manualRumble.Value;
+            }
+            else if (rumbleEnabled && rumble != null)
+            {
+                // Rumble works harder when it's carrying the cue alone. Read
+                // one tick later than it's set, which at 50 Hz is irrelevant.
+                rumble.SoloMode = !tiltEnabled;
+                right = rumble.MotorRight;
+                centre = rumble.MotorCentre;
+                left = rumble.MotorLeft;
+                hz = rumble.Hz;
+            }
+            SentRumbleRight = right; SentRumbleCentre = centre;
+            SentRumbleLeft = left; SentRumbleHz = hz;
 
             string message = $"Y[{FormatRotation(yaw)}]P[{FormatRotation(pitch)}]R[{FormatRotation(roll)}]" +
-                              $"V[{buzz},{buzz},{buzz},{rumbleHz}]";
+                              $"V[{right},{centre},{left},{hz}]";
             SendUdpToDevice(message);
         }
 

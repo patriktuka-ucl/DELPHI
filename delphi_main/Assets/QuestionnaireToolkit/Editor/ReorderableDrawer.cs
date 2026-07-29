@@ -12,6 +12,9 @@ namespace QuestionnaireToolkit.Editor {
 
 		private static Dictionary<int, ReorderableList> lists = new Dictionary<int, ReorderableList>();
 
+		// The base member is obsolete; the attribute is required on the override
+		// (CS0672) and does not change behaviour.
+		[System.Obsolete]
 		public override bool CanCacheInspectorGUI(SerializedProperty property) {
 
 			return false;

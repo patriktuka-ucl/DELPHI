@@ -121,7 +121,7 @@ namespace Delphi.Motion
 
         private void Awake()
         {
-            if (session == null) session = FindFirstObjectByType<SessionController>();
+            if (session == null) session = FindAnyObjectByType<SessionController>();
             ResolveCamera();
 
             // Kept hidden rather than merely ignored: with this component no

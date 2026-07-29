@@ -256,7 +256,7 @@ namespace Delphi.Session
 
         private void Awake()
         {
-            if (session == null) session = FindFirstObjectByType<SessionController>();
+            if (session == null) session = FindAnyObjectByType<SessionController>();
             if (participantCamera == null)
             {
                 // Name first, Display 0 only as a fallback: the researcher's
@@ -298,7 +298,7 @@ namespace Delphi.Session
                 return;
             }
 
-            if (FindFirstObjectByType<EventSystem>() == null)
+            if (FindAnyObjectByType<EventSystem>() == null)
                 Debug.LogWarning("[FreePlayPanel] No EventSystem in the scene — the panel will render but " +
                                   "won't respond to clicks/taps. Add one (GameObject > UI > Event System).");
 

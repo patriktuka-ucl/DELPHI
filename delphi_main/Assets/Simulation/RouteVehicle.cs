@@ -31,7 +31,7 @@ namespace Delphi.Simulation
 
         protected virtual void Awake()
         {
-            if (track == null) track = FindFirstObjectByType<Track>();
+            if (track == null) track = FindAnyObjectByType<Track>();
             if (track == null)
             {
                 Debug.LogError($"[{GetType().Name}] No Track in the scene.");

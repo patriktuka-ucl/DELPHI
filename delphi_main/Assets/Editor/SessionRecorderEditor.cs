@@ -27,7 +27,7 @@ namespace Delphi.EditorTools
             DrawDefaultInspector();
 
             var rec = (SessionRecorder)target;
-            var mgr = Object.FindFirstObjectByType<DelphiManager>();
+            var mgr = Object.FindAnyObjectByType<DelphiManager>();
 
             EditorGUILayout.Space(8);
             EditorGUILayout.LabelField("Recorded feeds", EditorStyles.boldLabel);

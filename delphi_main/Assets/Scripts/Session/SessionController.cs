@@ -500,11 +500,11 @@ namespace Delphi.Session
 
         private void Awake()
         {
-            if (manager == null)    manager    = FindFirstObjectByType<DelphiManager>();
-            if (carDriver == null)  carDriver  = FindFirstObjectByType<CarDriver>();
-            if (recorder == null)   recorder   = FindFirstObjectByType<SessionRecorder>();
-            if (narration == null)  narration  = FindFirstObjectByType<NarrationController>();
-            if (motionCues == null) motionCues = FindFirstObjectByType<Delphi.Motion.CarMotionCues>();
+            if (manager == null)    manager    = FindAnyObjectByType<DelphiManager>();
+            if (carDriver == null)  carDriver  = FindAnyObjectByType<CarDriver>();
+            if (recorder == null)   recorder   = FindAnyObjectByType<SessionRecorder>();
+            if (narration == null)  narration  = FindAnyObjectByType<NarrationController>();
+            if (motionCues == null) motionCues = FindAnyObjectByType<Delphi.Motion.CarMotionCues>();
 
             // Phase.Questionnaire now advances from the condition-evaluation
             // panel's own submit (see OnConditionEvaluationSubmitted), so

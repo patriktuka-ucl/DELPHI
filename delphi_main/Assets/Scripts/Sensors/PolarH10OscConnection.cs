@@ -94,7 +94,7 @@ namespace Delphi
             }
             Instance = this;
 
-            var mgr = FindFirstObjectByType<DelphiManager>();
+            var mgr = FindAnyObjectByType<DelphiManager>();
             if (mgr != null && !mgr.IsAnyChannelOn(Channel.HeartRate, Channel.RMSSD,
                                                     Channel.AccX, Channel.AccY, Channel.AccZ))
             {
@@ -153,7 +153,7 @@ namespace Delphi
             // that every rate in DELPHI lives on the manager. The strap only
             // accepts 25/50/100/200Hz, so the bridge clamps whatever we ask for
             // down to the nearest supported rate (e.g. 30 -> 25).
-            var mgr = FindFirstObjectByType<DelphiManager>();
+            var mgr = FindAnyObjectByType<DelphiManager>();
             int accRateHz = mgr != null ? Mathf.RoundToInt(mgr.imuRateHz) : 25;
 
             // --stdin-shutdown lets StopPythonBridge() below ask the bridge to

@@ -27,7 +27,7 @@ namespace BOforUnity.Examples
                 return;
             }
 
-            var manager = FindObjectOfType<BoForUnityManager>();
+            var manager = FindAnyObjectByType<BoForUnityManager>();
             if (manager == null || manager.parameters == null)
             {
                 Debug.LogWarning("ObjectVariableExposer: BoForUnityManager or parameters are missing.");
@@ -54,7 +54,7 @@ namespace BOforUnity.Examples
 
         public void StartQuestionnaire()
         {
-            var questionnaire = FindObjectOfType<QTQuestionnaireManager>();
+            var questionnaire = FindAnyObjectByType<QTQuestionnaireManager>();
             if (questionnaire == null)
             {
                 Debug.LogWarning("ObjectVariableExposer: QTQuestionnaireManager is missing.");

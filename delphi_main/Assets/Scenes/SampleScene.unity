@@ -292,7 +292,7 @@ GameObject:
   - component: {fileID: 95379956}
   - component: {fileID: 95379957}
   m_Layer: 0
-  m_Name: 4 - Turn (395-3000 m)
+  m_Name: 5 - Turn (1800-2500 m)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -307,7 +307,7 @@ Transform:
   m_GameObject: {fileID: 95379955}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 38.686554, y: 0, z: 384.86542}
+  m_LocalPosition: {x: 361.93195, y: 0, z: -306.7715}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -326,8 +326,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Delphi.Simulation.TrackEvent
   kind: 2
-  s: 395.27728
-  endS: 3000
+  s: 1799.9777
+  endS: 2500
   waitDuration: 3
   limitKmh: 30
 --- !u!1 &171821662
@@ -1737,6 +1737,7 @@ GameObject:
   - component: {fileID: 811196809}
   - component: {fileID: 811196813}
   - component: {fileID: 811196814}
+  - component: {fileID: 811196815}
   m_Layer: 0
   m_Name: YAW VR3
   m_TagString: Untagged
@@ -1771,7 +1772,7 @@ MonoBehaviour:
   textHeightMeters: 0.7
   useTint: 1
   tintColor: {r: 0.85, g: 0.06, b: 0.06, a: 1}
-  tintStrength: 0.3
+  tintStrength: 0.4
   tintFadeInSeconds: 1
   tintFadeOutSeconds: 0.5
   overlayRoot: {fileID: 0}
@@ -1845,12 +1846,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Delphi.Motion.YawVR3Connection
   cues: {fileID: 811196811}
-  car: {fileID: 2014745828}
-  rumbleEnabled: 0
-  rumbleBaseIntensity: 4
-  rumbleSpeedScale: 0.15
-  rumbleMaxIntensity: 30
-  rumbleHz: 45
+  rumble: {fileID: 0}
+  tiltEnabled: 1
+  rumbleEnabled: 1
+  tiltTransitionSeconds: 0.8
+  idleRumbleHz: 40
   rediscoverIntervalSeconds: 2
   motionSendRateHz: 50
   manualMaxDegreesPerSecond: 15
@@ -1870,6 +1870,61 @@ MonoBehaviour:
   connection: {fileID: 0}
   stepDegrees: 5
   maxTestDegrees: 20
+  rumbleStep: 5
+  hzStep: 5
+  sweepStepSeconds: 1.2
+--- !u!114 &811196815
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 811196808}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 01064a3320b26a646a0a296fd38ac8e3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Delphi.Motion.CarRumbleCues
+  car: {fileID: 0}
+  cues: {fileID: 0}
+  masterGain: 1
+  soloGain: 1.4
+  minEffectiveIntensity: 18
+  maxIntensity: 85
+  silenceThreshold: 0.02
+  minHz: 10
+  maxHz: 100
+  roadBedEnabled: 1
+  roadBedLevel: 0.18
+  roadBedReferenceKmh: 50
+  roadBedHz: 40
+  longitudinalEnabled: 1
+  referenceAccelMs2: 3
+  longitudinalGamma: 0.7
+  longitudinalGain: 1
+  attackSeconds: 0.06
+  releaseSeconds: 0.35
+  adaptationSeconds: 1.6
+  sustainLevel: 0.55
+  transientGain: 1
+  accelCentreWeight: 1
+  accelSideWeight: 0.45
+  brakeCentreWeight: 0.5
+  brakeSideWeight: 1
+  accelHz: 32
+  brakeHz: 72
+  accelBrakeBlendMs2: 0.3
+  lateralEnabled: 1
+  referenceYawRateDegPerSec: 15
+  lateralGamma: 0.75
+  lateralGain: 1
+  lateralInnerFraction: 0.25
+  lateralCentreFraction: 0.15
+  lateralHz: 55
+  invertLateralPan: 0
+  muteWhileFrozen: 1
+  muteWhileReturningToNeutral: 1
+  muteFadeSeconds: 0.4
 --- !u!1 &817889124
 GameObject:
   m_ObjectHideFlags: 0
@@ -2129,6 +2184,7 @@ MonoBehaviour:
   baselineWindowEndOffsetSeconds: 5
   exploreNudgeIdleSeconds: 0
   exploreNudgeMaxAuto: 2
+  freeRoamEstimatedSeconds: 300
   implicitTrial:
     iterations: 5
     samplingIterations: 3
@@ -2611,7 +2667,7 @@ GameObject:
   - component: {fileID: 1032869434}
   - component: {fileID: 1032869435}
   m_Layer: 0
-  m_Name: 5 - StopAndGo (1500 m)
+  m_Name: 4 - StopAndGo (1500 m)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

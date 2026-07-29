@@ -537,7 +537,7 @@ namespace Delphi.VR
 
             report.AppendLine($"  --- active canvases within {radius} m of the camera ---");
             bool foundAny = false;
-            foreach (var canvas in FindObjectsByType<Canvas>(FindObjectsSortMode.None))
+            foreach (var canvas in FindObjectsByType<Canvas>())
             {
                 if (!canvas.isActiveAndEnabled) continue;
                 float distance = Vector3.Distance(canvas.transform.position, _camT.position);
@@ -560,7 +560,7 @@ namespace Delphi.VR
             // actually draws.
             report.AppendLine($"  --- renderers whose bounds contain or nearly touch the camera ---");
             bool foundRenderer = false;
-            foreach (var renderer in FindObjectsByType<Renderer>(FindObjectsSortMode.None))
+            foreach (var renderer in FindObjectsByType<Renderer>())
             {
                 if (!renderer.isVisible && !renderer.enabled) continue;
                 var bounds = renderer.bounds;

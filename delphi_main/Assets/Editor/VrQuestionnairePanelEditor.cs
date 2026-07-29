@@ -151,7 +151,7 @@ namespace Delphi.EditorTools
         /// until the optimizer gets objectives it did not expect.</summary>
         private static void DrawWiring(VrQuestionnairePanel p)
         {
-            var session = Object.FindFirstObjectByType<SessionController>();
+            var session = Object.FindAnyObjectByType<SessionController>();
             if (session == null)
             {
                 EditorGUILayout.HelpBox("No SessionController in the scene, so this panel is " +
@@ -440,7 +440,7 @@ namespace Delphi.EditorTools
 
         private static void CopyPlacementToOthers(VrQuestionnairePanel from)
         {
-            var all = Object.FindObjectsByType<VrQuestionnairePanel>(FindObjectsSortMode.None);
+            var all = Object.FindObjectsByType<VrQuestionnairePanel>();
             int n = 0;
             foreach (var other in all)
             {

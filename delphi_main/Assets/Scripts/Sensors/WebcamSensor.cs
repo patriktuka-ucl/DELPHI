@@ -52,8 +52,10 @@ namespace Delphi
         public float MeasuredDriverFps { get; private set; }
         private uint _lastUpdateCount;   // Texture.updateCount at last blit
         private int _deliveredInWindow;
+        private int _renderedInWindow;   // our OWN frames, to sanity-check the window
         private float _windowStart;
         private bool _loggedRate;
+        private float _lastWarnedFps;    // 0 = not currently warning
 
         public override Texture CurrentFrame => _hasFrame ? _rt : null;
 
@@ -64,23 +66,47 @@ namespace Delphi
             if (_tex == null || !_tex.isPlaying || _tex.width <= 32) return;
 
             if (_tex.didUpdateThisFrame) _deliveredInWindow++;
+            _renderedInWindow++;
 
             float elapsed = Time.unscaledTime - _windowStart;
             if (elapsed < 5f) return;
+
+            // A delivery count is only meaningful if WE were running normally
+            // over the window. didUpdateThisFrame can only be observed on frames
+            // we actually render, so a domain reload, an asset import, or an
+            // unfocused Editor makes the camera look stalled when nothing is
+            // wrong with it — that is where the old "0.2 fps" readings came from.
+            bool windowIsTrustworthy = _renderedInWindow / elapsed >= 20f;
+
             MeasuredDriverFps = _deliveredInWindow / elapsed;
             _deliveredInWindow = 0;
+            _renderedInWindow = 0;
             _windowStart = Time.unscaledTime;
+            if (!windowIsTrustworthy) return;
 
             if (MeasuredDriverFps < 20f)
+            {
+                // Warn on entering the slow state and on a material change, not
+                // every 5 s forever: the old version logged this 1100+ times in
+                // one Editor session, which buries everything else in the console.
+                bool worthSaying = _lastWarnedFps <= 0f ||
+                                   Mathf.Abs(MeasuredDriverFps - _lastWarnedFps) > 0.25f * _lastWarnedFps;
+                if (!worthSaying) return;
+                _lastWarnedFps = MeasuredDriverFps;
+                _loggedRate = false;
                 Debug.LogWarning($"[WebcamSensor] Driver is only delivering " +
-                                 $"{MeasuredDriverFps:0.#} fps from '{_tex.deviceName}' — the lag is " +
-                                 "upstream of DELPHI. Usual causes: low light (auto-exposure " +
-                                 "lengthens shutter time and halves the rate — add light or lock " +
-                                 "exposure in the camera's own settings), USB bandwidth at high " +
-                                 "resolution (try 640x480), or iPhone Continuity Camera latency.", this);
+                                 $"{MeasuredDriverFps:0.#} fps from '{_tex.deviceName}' at " +
+                                 $"{_tex.width}x{_tex.height} — the lag is upstream of DELPHI, and " +
+                                 "does NOT slow the rest of the app down. Usual causes: on Windows, " +
+                                 "an uncompressed capture format at 720p+ exceeds USB 2.0 bandwidth " +
+                                 "and the driver drops to ~10 fps (try 640x480, or requesting 30 " +
+                                 "rather than 60); low light, where auto-exposure lengthens shutter " +
+                                 "time and halves the rate; or iPhone Continuity Camera latency.", this);
+            }
             else if (!_loggedRate)
             {
                 _loggedRate = true;
+                _lastWarnedFps = 0f;
                 Debug.Log($"[WebcamSensor] Driver delivering {MeasuredDriverFps:0.#} fps " +
                           $"at {_tex.width}x{_tex.height}.", this);
             }
@@ -92,9 +118,11 @@ namespace Delphi
             _timeSinceStart = 0f;
             _hasFrame = false;
             _deliveredInWindow = 0;
+            _renderedInWindow = 0;
             _windowStart = Time.unscaledTime;
             _lastUpdateCount = 0;
             _loggedRate = false;
+            _lastWarnedFps = 0f;
 
             var devices = WebCamTexture.devices;
             if (devices.Length == 0)

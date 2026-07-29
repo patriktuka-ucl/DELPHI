@@ -156,8 +156,8 @@ namespace Delphi
 
         private void Awake()
         {
-            if (manager == null) manager = FindFirstObjectByType<DelphiManager>();
-            if (egoCar == null) egoCar = FindFirstObjectByType<CarDriver>();
+            if (manager == null) manager = FindAnyObjectByType<DelphiManager>();
+            if (egoCar == null) egoCar = FindAnyObjectByType<CarDriver>();
             _readbackSupported = SystemInfo.supportsAsyncGPUReadback;
         }
 

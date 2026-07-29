@@ -51,7 +51,7 @@ namespace Delphi
 
         private void Awake()
         {
-            if (manager == null) manager = FindFirstObjectByType<DelphiManager>();
+            if (manager == null) manager = FindAnyObjectByType<DelphiManager>();
         }
 
         // ── Sessions on disk ────────────────────────────────────────────

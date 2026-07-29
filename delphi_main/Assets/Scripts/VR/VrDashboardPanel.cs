@@ -135,7 +135,7 @@ namespace Delphi.VR
                 return;
             }
 
-            if (experimentUI == null) experimentUI = FindFirstObjectByType<ExperimentUI>();
+            if (experimentUI == null) experimentUI = FindAnyObjectByType<ExperimentUI>();
             if (experimentUI == null)
             {
                 Debug.LogError("[VrDashboardPanel] No ExperimentUI in the scene — nothing to show.", this);
@@ -323,7 +323,7 @@ namespace Delphi.VR
             // precisely the cameras that write to disk, so missing them would
             // put the dashboard in the recordings and nowhere else.
             int mask = 1 << _dashboardLayer;
-            var cameras = FindObjectsByType<Camera>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            var cameras = FindObjectsByType<Camera>(FindObjectsInactive.Include);
             foreach (var cam in cameras)
             {
                 // BOTH dashboard cameras are exempt. Missing _vrCam here is
