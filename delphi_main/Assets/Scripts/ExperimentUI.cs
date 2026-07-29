@@ -87,8 +87,13 @@ namespace Delphi
         [Range(0f, 80f)] public float frameGapHorizontalPixels = 14f;
         [Tooltip("Vertical gap between rows of camera feeds, in pixels.")]
         [Range(0f, 80f)] public float frameGapVerticalPixels = 12f;
+        [Tooltip("How many feeds sit on a row before it wraps. The feed box " +
+                 "resizes to match, so this is the only field you need to " +
+                 "touch to go from one wide row to a compact block.")]
+        [Range(1, 8)] public int frameColumns = 4;
         private float _lastFrameH = -1f, _lastFrameMaxW = -1f, _lastFrameHeadGap = -1f;
         private float _lastFrameGapH = -1f, _lastFrameGapV = -1f;
+        private int _lastFrameCols = -1;
 
         // ── Palette ─────────────────────────────────────────────────────
         private readonly Color _bg      = new Color(0.055f, 0.065f, 0.09f, 1f);
@@ -384,7 +389,8 @@ namespace Delphi
                 Mathf.Approximately(frameMaxWidthPixels, _lastFrameMaxW) &&
                 Mathf.Approximately(frameHeadingGapPixels, _lastFrameHeadGap) &&
                 Mathf.Approximately(frameGapHorizontalPixels, _lastFrameGapH) &&
-                Mathf.Approximately(frameGapVerticalPixels, _lastFrameGapV))
+                Mathf.Approximately(frameGapVerticalPixels, _lastFrameGapV) &&
+                frameColumns == _lastFrameCols)
                 return;
 
             _lastFrameH = frameHeightPixels;
@@ -392,22 +398,31 @@ namespace Delphi
             _lastFrameHeadGap = frameHeadingGapPixels;
             _lastFrameGapH = frameGapHorizontalPixels;
             _lastFrameGapV = frameGapVerticalPixels;
+            _lastFrameCols = frameColumns;
 
-            float titleH = GridTitleH, valH = GridValH, gap = FrameHeadGap, h = FrameCellH;
+            float headerH = FrameHeaderH, gap = FrameHeadGap, h = FrameCellH;
             foreach (var p in _panels)
             {
                 if (!p.isFrame || p.cellRt == null) continue;
-                p.cellRt.sizeDelta = new Vector2(_cellW, h + titleH + valH + gap);
+                float cw = FrameCellW;
+                p.cellRt.sizeDelta = new Vector2(cw, h + headerH + gap);
+                if (p.badgeBg != null)
+                    p.badgeBg.rectTransform.anchoredPosition = new Vector2(cw - BadgeW, -1f);
+                if (p.title != null)
+                    p.title.rectTransform.sizeDelta = new Vector2(cw - BadgeW - 8f, GridTitleH);
                 var irt = p.image.rectTransform;
-                irt.anchoredPosition = new Vector2(0, -(titleH + valH + gap));
+                irt.anchoredPosition = new Vector2(0, -(headerH + gap));
                 // Width is re-derived from the live texture's aspect in
                 // RefreshFrame; this is the placeholder size a feed with no
                 // signal keeps, which otherwise stays at the old height and
                 // makes the box look wrong for the one channel that is down.
-                irt.sizeDelta = new Vector2(Mathf.Min(_cellW, _maxFrameW), h);
+                irt.sizeDelta = new Vector2(Mathf.Min(cw, _maxFrameW), h);
             }
 
+            // Background AND header together — a resized box with a stale
+            // header bar is the "background doesn't cover the whole thing" look.
             if (_frameBoxRt != null) _frameBoxRt.sizeDelta = new Vector2(FrameBoxW, FrameBoxH);
+            if (_frameHeaderRt != null) _frameHeaderRt.sizeDelta = new Vector2(FrameBoxW, CardHeaderH);
 
             // The pack signature is unchanged (the same cells are active), so
             // force the reflow that would otherwise be skipped as a no-op.
@@ -426,6 +441,10 @@ namespace Delphi
             public GameObject cell;        // the whole grid cell (shown/hidden + moved)
             public RectTransform cellRt;
             public Text title, value;
+            // Frame cells only: the status pill that sits on the heading line
+            // beside the label, in place of a scalar cell's value row.
+            public Image badgeBg, badgeDot;
+            public Text badgeTxt;
             public RawImage image;
             public Texture2D tex;
             public Color32[] buffer;
@@ -445,6 +464,28 @@ namespace Delphi
         private float FrameHeadGap => Mathf.Max(0f, frameHeadingGapPixels);
         private float FrameGapH => Mathf.Max(0f, frameGapHorizontalPixels);
         private float FrameGapV => Mathf.Max(0f, frameGapVerticalPixels);
+        private int FrameCols => Mathf.Clamp(frameColumns, 1, 8);
+
+        /// <summary>A FRAME CELL IS AS WIDE AS A FEED CAN GET, not as wide as a
+        /// scalar cell.
+        ///
+        /// This was the bug behind feeds hanging out of their box: cells were
+        /// laid out at _cellW (210) while RefreshFrame is allowed to size an
+        /// image up to frameMaxWidthPixels (336) from its own aspect. Every
+        /// panorama therefore overflowed its cell, its neighbour and the card
+        /// background, which had been measured for the narrow cell. Sizing the
+        /// cell to the widest a feed may become makes the box, the packing and
+        /// the image agree by construction.</summary>
+        private float FrameCellW => Mathf.Max(_cellW, _maxFrameW);
+
+        /// <summary>A feed's heading is ONE line — the label and its status
+        /// badge side by side — where a scalar cell stacks a label over a
+        /// value. A feed's status is two or three characters ("live"), so
+        /// giving it a whole row of its own spent vertical space on nothing
+        /// and pushed the image down for no reason.</summary>
+        private float FrameHeaderH => GridTitleH;
+        /// <summary>Width reserved for the status badge on the heading line.</summary>
+        private const float BadgeW = 74f, BadgeH = 15f;
 
         // Grid layout — shared by BuildSensorGrid and RelayoutGrid so the live
         // reflow lands cells in exactly the same slots the initial build uses.
@@ -455,7 +496,7 @@ namespace Delphi
         /// <summary>Frame rows are taller than scalar rows, so the frame box
         /// and its packing must size off this rather than GridRowH — otherwise
         /// the box is drawn for short rows and the feeds overflow it.</summary>
-        private float FrameRowH => FrameCellH + GridTitleH + GridValH + FrameHeadGap;
+        private float FrameRowH => FrameCellH + FrameHeaderH + FrameHeadGap;
         // Bit i = panel i is active. Recomputed each redraw; the grid only
         // reflows when this changes, so a steady set costs one long compare.
         private long _lastLayoutSig = -1;
@@ -518,12 +559,14 @@ namespace Delphi
                 bool active = IsPanelActive(p);
                 if (p.cell.activeSelf != active) p.cell.SetActive(active);
                 if (!active) continue;
-                int col = idx % GridCols, row = idx / GridCols;
-                // Frame cells carry their own gaps so the feeds can be spread
-                // out without loosening the scalar grid, which is dense on
-                // purpose — twenty waveforms have to fit on one screen.
+                int cols = isFrame ? FrameCols : GridCols;
+                int col = idx % cols, row = idx / cols;
+                // Frame cells carry their own gaps and column count so the
+                // feeds can be spread out without loosening the scalar grid,
+                // which is dense on purpose — twenty waveforms have to fit on
+                // one screen.
                 float rowPitch = isFrame ? FrameRowH + FrameGapV : GridRowH + GridRowGap;
-                float colPitch = _cellW + (isFrame ? FrameGapH : GridColGap);
+                float colPitch = isFrame ? FrameCellW + FrameGapH : _cellW + GridColGap;
                 p.cellRt.anchoredPosition = new Vector2(
                     SectionContentX + col * colPitch,
                     SectionContentY - row * rowPitch);
@@ -585,14 +628,96 @@ namespace Delphi
                     if (w > _maxFrameW) { w = _maxFrameW; h = w / Mathf.Max(aspect, 1e-4f); }
                     p.image.rectTransform.sizeDelta = new Vector2(w, h);
                 }
-                p.value.text = manager.IsInPlayback ? "playback" : "live"; p.value.color = (Color)WaveColor;
+                if (manager.IsInPlayback) SetBadge(p, "playback", _running);
+                else                      SetBadge(p, "live", (Color)WaveColor);
             }
-            else (p.value.text, p.value.color) = manager.GetStatus(p.frameChannel) switch
+            else
             {
-                ChannelStatus.Disabled => ("disabled", new Color(0.85f,0.75f,0.25f)),
-                ChannelStatus.NoSignal => ("no signal", _estop),
-                _                      => ("not attached", _pending)
+                var (label, col) = manager.GetStatus(p.frameChannel) switch
+                {
+                    ChannelStatus.Disabled => ("disabled", new Color(0.85f, 0.75f, 0.25f)),
+                    ChannelStatus.NoSignal => ("no signal", _estop),
+                    _                      => ("not attached", _pending)
+                };
+                SetBadge(p, label, col);
+            }
+        }
+
+        /// <summary>Paints a feed's status badge: hairline border, lit dot, and
+        /// the same coloured word the cell always showed.</summary>
+        private static void SetBadge(Panel p, string label, Color col)
+        {
+            if (p.badgeTxt == null || p.badgeBg == null) return;
+            if (p.badgeTxt.text != label) p.badgeTxt.text = label;
+            p.badgeTxt.color = col;
+            p.badgeDot.color = col;
+            // The border is the quiet part — at full strength it competes with
+            // the dot and the word for the same small patch of screen.
+            p.badgeBg.color = new Color(col.r, col.g, col.b, 0.55f);
+        }
+
+        // Procedural, not imported. Unity's built-in UI skin sprite does not
+        // reliably resolve through GetBuiltinResource in this project, and a
+        // missing sprite silently degrades to a hard rectangle — exactly the
+        // "it looks awful" failure this artwork exists to avoid.
+        private static Sprite _pillOutline, _dot;
+
+        /// <summary>A rounded-rect RING, 9-sliced so it keeps a constant border
+        /// weight and corner radius at whatever size the badge is drawn.</summary>
+        private static Sprite PillOutlineSprite
+        {
+            get
+            {
+                if (_pillOutline != null) return _pillOutline;
+                const int S = 32, R = 15;
+                const float Border = 1.4f;
+                var px = new Color[S * S];
+                for (int y = 0; y < S; y++)
+                for (int x = 0; x < S; x++)
+                {
+                    float dx = Mathf.Max(R - x - 0.5f, 0f, x + 0.5f - (S - R));
+                    float dy = Mathf.Max(R - y - 0.5f, 0f, y + 0.5f - (S - R));
+                    float d = Mathf.Sqrt(dx * dx + dy * dy);
+                    // Outer coverage minus inner coverage = the ring between them.
+                    float outer = Mathf.Clamp01(R - d + 0.5f);
+                    float inner = Mathf.Clamp01(R - Border - d + 0.5f);
+                    px[y * S + x] = new Color(1f, 1f, 1f, Mathf.Clamp01(outer - inner));
+                }
+                _pillOutline = MakeSprite(px, S, new Vector4(R, R, R, R));
+                return _pillOutline;
+            }
+        }
+
+        private static Sprite DotSprite
+        {
+            get
+            {
+                if (_dot != null) return _dot;
+                const int S = 24;
+                float r = S * 0.5f, c = r - 0.5f;
+                var px = new Color[S * S];
+                for (int y = 0; y < S; y++)
+                for (int x = 0; x < S; x++)
+                {
+                    float d = Mathf.Sqrt((x - c) * (x - c) + (y - c) * (y - c));
+                    px[y * S + x] = new Color(1f, 1f, 1f, Mathf.Clamp01(r - d));
+                }
+                _dot = MakeSprite(px, S, Vector4.zero);
+                return _dot;
+            }
+        }
+
+        private static Sprite MakeSprite(Color[] px, int size, Vector4 border)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            {
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+                hideFlags = HideFlags.HideAndDontSave
             };
+            tex.SetPixels(px); tex.Apply();
+            return Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f),
+                                 100f, 0, SpriteMeshType.FullRect, border);
         }
 
         private void RedrawWave(Panel p)
@@ -723,9 +848,48 @@ namespace Delphi
             }
         }
 
+        /// <summary>Dead time after a stop during which F1 will not resume.
+        ///
+        /// The one hazard in making a single key do both: F1 is pressed in a
+        /// hurry, and a hurried press is often two presses. Without this, the
+        /// second one puts a participant who is mid-incident straight back onto
+        /// a moving platform. A second and a half is longer than any double-tap
+        /// and shorter than any deliberate decision to continue — and the
+        /// RESUME button is never locked, so nothing is actually unreachable.</summary>
+        private const float EstopResumeLockSeconds = 1.5f;
+        private float _estopResumeLockUntil;
+
+        private void HandleEmergencyKey()
+        {
+            if (session.CurrentPhase != SessionController.Phase.EmergencyStop)
+            {
+                session.EmergencyStop();
+                _estopResumeLockUntil = Time.unscaledTime + EstopResumeLockSeconds;
+                Log("EMERGENCY STOP (F1). Press F1 again to resume.");
+                return;
+            }
+
+            float wait = _estopResumeLockUntil - Time.unscaledTime;
+            if (wait > 0f)
+                Log($"F1 ignored — resume unlocks in {wait:0.0}s, so a double-tap can't restart the rig. " +
+                    "The RESUME button works now if you need it.");
+            else { session.Resume(); Log("RESUMED (F1)."); }
+        }
+
         private void HandleKeyboard()
         {
             var kb = Keyboard.current; if (kb == null) return;
+
+            // F1 STOPS AND RESUMES, and it is handled before every other guard
+            // in this method — before the "is a recording loaded" split and
+            // before the text-field check.
+            //
+            // A safety key that only works in some UI states is not a safety
+            // key, and the state it would most plausibly be blocked in (someone
+            // typing a session name) is not one where the participant is any
+            // less strapped to a moving platform.
+            if (kb.f1Key.wasPressedThisFrame && session != null) { HandleEmergencyKey(); return; }
+
             if (_nameField != null && _nameField.isFocused) return;
 
             // SPACE does two different things, decided by whether a recording
@@ -967,11 +1131,13 @@ namespace Delphi
             _nudgeBtn = BtnObj(host, "PLAY EXPLORE NUDGE", new Vector2(16, -178), new Vector2(205, 38), () => session.PlayExploreNudge());
             _endFreePlayBtn = BtnObj(host, "END FREE-PLAY", new Vector2(233, -178), new Vector2(205, 38), () => session.EndFreePlay());
 
-            var estopImg = Btn(host, "EMERGENCY STOP", new Vector2(16, -240), new Vector2(422, 46), () => session.EmergencyStop(), out _);
+            // The shortcut is on the button because a safety key nobody knows
+            // about is not a safety key.
+            var estopImg = Btn(host, "EMERGENCY STOP   (F1)", new Vector2(16, -240), new Vector2(422, 46), () => session.EmergencyStop(), out _);
             _estopBtn = estopImg.GetComponent<Button>(); estopImg.color = _estop;
-            var resumeImg = Btn(host, "RESUME", new Vector2(16, -240), new Vector2(422, 46), () => session.Resume(), out _);
+            var resumeImg = Btn(host, "RESUME   (F1)", new Vector2(16, -240), new Vector2(422, 46), () => session.Resume(), out _);
             _estopResumeBtn = resumeImg.GetComponent<Button>(); resumeImg.color = _btnSel;
-            _estopBanner = Txt(host, "STOPPED — platform returning, passthrough on", 12, _estop, new Vector2(16, -290), new Vector2(422, 18));
+            _estopBanner = Txt(host, "STOPPED — platform returning", 12, _estop, new Vector2(16, -290), new Vector2(422, 18));
         }
 
         // Left-column layout, each derived from the one above it so a height
@@ -1438,10 +1604,10 @@ namespace Delphi
         // The feed box is sized from the SAME expressions the cells pack with,
         // so widening the gaps grows the box instead of pushing feeds out
         // through its right edge.
-        private RectTransform _frameBoxRt;
-        private static int FrameRowCount =>
-            Mathf.Max(1, Mathf.CeilToInt(DelphiManager.AllFrameChannels.Length / (float)GridCols));
-        private float FrameBoxW => GridCols * (_cellW + FrameGapH) - FrameGapH + 32f;
+        private RectTransform _frameBoxRt, _frameHeaderRt;
+        private int FrameRowCount =>
+            Mathf.Max(1, Mathf.CeilToInt(DelphiManager.AllFrameChannels.Length / (float)FrameCols));
+        private float FrameBoxW => FrameCols * (FrameCellW + FrameGapH) - FrameGapH + 32f;
         private float FrameBoxH =>
             CardHeaderH + FrameRowCount * FrameRowH + (FrameRowCount - 1) * FrameGapV + 16f;
 
@@ -1461,7 +1627,8 @@ namespace Delphi
             var scalarBox = Card(root, "Scalar Sensors — physiological & behavioral signals",
                 new Vector2(GridX0, GridY0), new Vector2(boxW, scalarBoxH));
             var frameBox = Card(root, "Frame Sensors — camera / video feeds",
-                new Vector2(GridX0, GridY0 - scalarBoxH - 16f), new Vector2(FrameBoxW, FrameBoxH));
+                new Vector2(GridX0, GridY0 - scalarBoxH - 16f), new Vector2(FrameBoxW, FrameBoxH),
+                out _frameHeaderRt);
             _frameBoxRt = (RectTransform)frameBox;
 
             for (int i = 0; i < scalar.Length; i++)
@@ -1480,24 +1647,70 @@ namespace Delphi
             float titleH = GridTitleH, valH = GridValH;
             float contentH = isFrame ? FrameCellH : _cellH;
             float headGap = isFrame ? FrameHeadGap : 0f;
-            float rowH = contentH + titleH + valH + headGap;
+            float headerH = isFrame ? FrameHeaderH : titleH + valH;
+            float rowH = contentH + headerH + headGap;
             string label = isFrame ? DelphiManager.FrameMeta(frameChannel).label : DelphiManager.Meta(channel).label;
 
             // Position is provisional — RelayoutGrid() packs the ACTIVE cells
             // with no gaps and hides the rest immediately after this returns.
             var cont = Empty(parent, $"Cell_{label}"); var crt = cont.GetComponent<RectTransform>();
-            crt.sizeDelta = new Vector2(_cellW, rowH);
+            var panel = new Panel { isFrame = isFrame, cell = cont, cellRt = crt };
 
-            var t = Txt(cont.transform, label.TrimEnd(' ', '(', ')'), 13, new Color(0.8f,0.85f,0.95f), new Vector2(0, 0), new Vector2(_cellW, titleH));
-            var v = Txt(cont.transform, "…", 12, _pending, new Vector2(0, -titleH), new Vector2(_cellW, valH)); v.alignment = TextAnchor.UpperRight;
+            // A FEED'S LABEL AND STATUS SHARE ONE LINE; a scalar's are stacked.
+            // A waveform's readout is a live number that changes every frame
+            // and wants room ("128.4 bpm  CLIP"). A feed's is one word that
+            // changes maybe twice a session, so it belongs beside the name as a
+            // badge, not under it as a value.
+            float cellW = isFrame ? FrameCellW : _cellW;
+            float labelW = isFrame ? cellW - BadgeW - 8f : cellW;
+            crt.sizeDelta = new Vector2(cellW, rowH);
+
+            panel.title = Txt(cont.transform, label.TrimEnd(' ', '(', ')'), 13,
+                              new Color(0.8f, 0.85f, 0.95f), new Vector2(0, 0), new Vector2(labelW, titleH));
+
+            if (isFrame)
+            {
+                // OUTLINE, NOT A FILL. A solid block of colour with knocked-out
+                // text is louder than the label it sits beside and drags the
+                // eye to the one part of the cell that almost never changes.
+                // A hairline border with a lit dot reads as a status at a
+                // glance and still lets the feed be the thing you look at.
+                var bg = NewImage(cont.transform, _pending);
+                bg.sprite = PillOutlineSprite; bg.type = Image.Type.Sliced;
+                var brt = bg.rectTransform;
+                brt.anchoredPosition = new Vector2(cellW - BadgeW, -1f);
+                brt.sizeDelta = new Vector2(BadgeW, BadgeH);
+                panel.badgeBg = bg;
+
+                var dot = NewImage(bg.transform, _pending);
+                dot.sprite = DotSprite;
+                var drt = dot.rectTransform;
+                drt.anchorMin = drt.anchorMax = new Vector2(0f, 0.5f);
+                drt.pivot = new Vector2(0.5f, 0.5f);
+                drt.anchoredPosition = new Vector2(7f, 0f);
+                drt.sizeDelta = new Vector2(5f, 5f);
+                panel.badgeDot = dot;
+
+                var bt = Txt(bg.transform, "…", 10, _pending, Vector2.zero, new Vector2(BadgeW, BadgeH));
+                bt.alignment = TextAnchor.MiddleLeft;
+                var trt = bt.rectTransform;
+                trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one;
+                trt.offsetMin = new Vector2(14f, 0f); trt.offsetMax = new Vector2(-4f, 0f);
+                panel.badgeTxt = bt;
+            }
+            else
+            {
+                var v = Txt(cont.transform, "…", 12, _pending, new Vector2(0, -titleH), new Vector2(cellW, valH));
+                v.alignment = TextAnchor.UpperRight;
+                panel.value = v;
+            }
 
             var imgGO = new GameObject("Content", typeof(RawImage)); imgGO.transform.SetParent(cont.transform, false);
             var raw = imgGO.GetComponent<RawImage>(); raw.color = Color.white;
             var irt = imgGO.GetComponent<RectTransform>();
             irt.anchorMin = irt.anchorMax = new Vector2(0, 1); irt.pivot = new Vector2(0, 1);
-            irt.anchoredPosition = new Vector2(0, -(titleH + valH + headGap)); irt.sizeDelta = new Vector2(_cellW, contentH);
-
-            var panel = new Panel { isFrame = isFrame, cell = cont, cellRt = crt, title = t, value = v, image = raw };
+            irt.anchoredPosition = new Vector2(0, -(headerH + headGap)); irt.sizeDelta = new Vector2(cellW, contentH);
+            panel.image = raw;
             if (isFrame)
             {
                 panel.frameChannel = frameChannel;
@@ -1568,12 +1781,22 @@ namespace Delphi
         // card background.
         private const float CardHeaderH = 30f;
 
-        private Transform Card(Transform parent, string title, Vector2 pos, Vector2 size)
+        private Transform Card(Transform parent, string title, Vector2 pos, Vector2 size) =>
+            Card(parent, title, pos, size, out _);
+
+        /// <summary>As Card, but hands back the header bar so a box that gets
+        /// RESIZED at runtime can keep the two in step. The header is a
+        /// separate image sized once at build; without this the feed box grows
+        /// and its title bar stays at the old width, leaving a stub of header
+        /// over a wider background.</summary>
+        private Transform Card(Transform parent, string title, Vector2 pos, Vector2 size,
+                               out RectTransform header)
         {
             var img = NewImage(parent, _card); var rt = img.rectTransform; rt.anchoredPosition = pos; rt.sizeDelta = size;
 
-            var header = NewImage(img.transform, _card2);
-            var hrt = header.rectTransform; hrt.sizeDelta = new Vector2(size.x, CardHeaderH);
+            var headerImg = NewImage(img.transform, _card2);
+            var hrt = headerImg.rectTransform; hrt.sizeDelta = new Vector2(size.x, CardHeaderH);
+            header = hrt;
 
             var t = Txt(header.transform, title, 14, _accent, new Vector2(14, -8), new Vector2(size.x - 28, 20));
             t.fontStyle = FontStyle.Bold;

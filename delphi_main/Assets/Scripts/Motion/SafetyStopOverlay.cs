@@ -1,51 +1,39 @@
 using UnityEngine;
 using UnityEngine.UI;
-using Varjo.XR;
 using Delphi.Session;
 
 namespace Delphi.Motion
 {
     /// <summary>
-    /// What the participant sees during Phase.EmergencyStop: the room fades in
-    /// through the headset's passthrough cameras, with a warning banner
-    /// wrapped right around them so it is readable whichever way they happen to
-    /// be facing.
+    /// The message the participant sees during Phase.EmergencyStop: a sign in
+    /// front of them, or the same phrase wrapped right around them.
     ///
-    /// WHY PASSTHROUGH RATHER THAN JUST A MESSAGE.
+    /// GENERATED IN CODE, not authored in the scene, because it has to be
+    /// rebuilt whenever the message, size or placement changes, and because it
+    /// is the one piece of UI in this project that must be correct on a day
+    /// when everything else has gone wrong. It has no scene dependencies that
+    /// an unrelated edit can break.
     ///
-    ///   An emergency stop is triggered when something has gone wrong for the
-    ///   person strapped into a moving motion platform. The single most useful
-    ///   thing to give them at that moment is their actual surroundings — the
-    ///   room, the harness, the researcher walking toward them. A virtual sign
-    ///   saying the ride has stopped still leaves them sealed inside a headset
-    ///   during the exact minute they most want out of it.
-    ///
-    /// WHY IT FADES INSTEAD OF CUTTING.
-    ///
-    ///   A hard cut from a moving virtual world to a static real one is a
-    ///   vestibular mismatch delivered instantly, to someone who may already be
-    ///   nauseated — which is a plausible reason the stop was pressed at all.
-    ///   Three seconds is long enough for the eyes to follow the change and
-    ///   short enough not to feel like a malfunction. It is on a slider because
-    ///   the right number is a judgement about participants, not about code.
-    ///
-    /// WHY THE TEXT RING IS BUILT IN CODE.
-    ///
-    ///   It has to be regenerated whenever the message, the radius or the
-    ///   repeat count changes, and a hand-authored ring of a dozen canvases is
-    ///   something nobody will re-lay-out correctly under time pressure. It is
-    ///   also the one piece of UI in this project that MUST be correct on a day
-    ///   when everything else has gone wrong, so it has no scene dependencies
-    ///   that can be broken by an unrelated edit.
-    ///
-    /// WHERE TO PUT THIS COMPONENT: anywhere. It anchors its own ring to
-    /// "[VR] Seat Reference" (the driver's eye point, fixed to the car) and
-    /// falls back to the participant camera outside VR. NOT the head — a
-    /// message welded to the face is unreadable and nauseating, and this thing
-    /// appears precisely when the participant is already having a bad time.
+    /// WHERE TO PUT THIS COMPONENT: anywhere. It anchors to "[VR] Seat
+    /// Reference" (the driver's eye point, fixed to the car) and falls back to
+    /// the participant camera outside VR. NOT the head — a message welded to
+    /// the face is unreadable and nauseating, and this appears precisely when
+    /// the participant is already having a bad time.
     /// </summary>
     public class SafetyStopOverlay : MonoBehaviour
     {
+        /// <summary>How the message is presented.</summary>
+        public enum BannerStyle
+        {
+            /// <summary>One flat sign straight ahead. Reads instantly, and the
+            /// participant does not have to be facing any particular way for it
+            /// to make sense.</summary>
+            SignInFront = 0,
+            /// <summary>The phrase bent into a closed circle all the way
+            /// around.</summary>
+            Ring360 = 1,
+        }
+
         [Header("Links (auto-found if left empty)")]
         public SessionController session;
         [Tooltip("The camera the participant looks through. Auto-found from " +
@@ -53,46 +41,56 @@ namespace Delphi.Motion
         public Camera participantCamera;
 
         [Header("Message")]
-        [Tooltip("The phrase repeated around the ring. Whatever you type here " +
-                 "is what a participant reads in every direction.")]
+        [Tooltip("A single sign ahead, or the phrase wrapped 360° around the " +
+                 "participant.")]
+        public BannerStyle bannerStyle = BannerStyle.SignInFront;
+        [Tooltip("What the sign says.")]
         [TextArea(1, 3)] public string bannerText = "EMERGENCY STOP";
-        [Tooltip("Placed between repeats, so the ring reads as one continuous " +
-                 "line rather than words butted together.")]
+        [Tooltip("Ring style only — placed between repeats so the ring reads as " +
+                 "one continuous line rather than words butted together.")]
         public string separator = "   —   ";
-        [Tooltip("How many times the phrase goes around. Also how many flat " +
-                 "segments approximate the circle, so higher is both more " +
-                 "repeats AND a rounder ring.")]
-        [Range(3, 40)] public int repeatCount = 12;
+        [Tooltip("Ring style only — how many times the phrase repeats around " +
+                 "the full 360°.")]
+        [Range(1, 20)] public int loopCount = 4;
         public Color textColor = new Color(1f, 0.23f, 0.23f, 1f);
 
-        [Header("Ring placement (around the driver's eye point)")]
-        [Tooltip("Distance from the participant to the banner, in metres. " +
-                 "Beyond about 1.5 m it converges comfortably in stereo; too " +
-                 "close and it cannot be focused on.")]
+        [Header("Sign placement (style = Sign In Front)")]
+        [Tooltip("How far ahead the sign sits, in metres. Beyond about 1.5 m it " +
+                 "converges comfortably in stereo; much closer and it cannot be " +
+                 "focused on.")]
+        [Range(0.5f, 6f)] public float signDistanceMeters = 2f;
+        [Tooltip("Width of the whole sign in metres. The lettering is sized to " +
+                 "fit, so this is the only size control you need.")]
+        [Range(0.2f, 4f)] public float signWidthMeters = 1.2f;
+        [Tooltip("Height relative to the eye line, in metres. Positive is up.")]
+        [Range(-2f, 2f)] public float signHeightMeters = 0.2f;
+
+        [Header("Ring placement (style = Ring 360)")]
+        [Tooltip("Distance from the participant to the banner, in metres.")]
         [Range(1f, 8f)] public float ringRadiusMeters = 2.5f;
-        [Tooltip("Height relative to the eye line, in metres. Slightly below " +
-                 "eye level reads as signage rather than a heads-up display.")]
+        [Tooltip("Height relative to the eye line, in metres.")]
         [Range(-2f, 2f)] public float ringHeightMeters = -0.15f;
         [Tooltip("Cap height of the lettering, in metres.")]
-        [Range(0.05f, 1.5f)] public float textHeightMeters = 0.30f;
+        [Range(0.05f, 1.5f)] public float textHeightMeters = 0.28f;
 
-        [Header("Passthrough")]
-        [Tooltip("Fade the Varjo XR-3's video see-through image in over the " +
-                 "virtual scene when the stop is triggered. No effect without " +
-                 "mixed-reality hardware, so the desktop path is untouched.")]
-        public bool usePassthrough = true;
-        [Tooltip("Seconds for the real room to fade in. A hard cut is a " +
-                 "vestibular mismatch delivered instantly to someone who may " +
-                 "already be nauseated; too slow reads as a malfunction.")]
-        [Range(0f, 10f)] public float fadeSeconds = 3f;
-        [Tooltip("How much of the virtual scene is left at the end of the " +
-                 "fade. 0 = the room only. Raise it if the banner needs " +
-                 "something behind it to read against.")]
-        [Range(0f, 1f)] public float finalSceneOpacity = 0f;
-        [Tooltip("Seconds to fade the virtual scene back in when the session " +
-                 "resumes. Quicker than the fade out — coming back is a " +
-                 "deliberate act the participant has agreed to.")]
-        [Range(0f, 10f)] public float restoreSeconds = 1f;
+        [Header("Screen tint")]
+        [Tooltip("Wash the whole view with colour while the stop is active, so " +
+                 "the state is unmistakable even if the participant happens to " +
+                 "be looking away from the sign.")]
+        public bool useTint = true;
+        [Tooltip("Tint hue. The alpha of this colour is ignored — use Strength.")]
+        public Color tintColor = new Color(0.85f, 0.06f, 0.06f);
+        [Tooltip("How strong the tint gets. Keep it low: this sits over the " +
+                 "whole world for as long as the stop lasts, and anything heavy " +
+                 "enough to read as 'red' at a glance is also heavy enough to " +
+                 "be unpleasant after thirty seconds.")]
+        [Range(0f, 0.6f)] public float tintStrength = 0.18f;
+        [Tooltip("Seconds to fade the tint in. A snap to red is a startle on " +
+                 "top of whatever already went wrong.")]
+        [Range(0f, 5f)] public float tintFadeInSeconds = 1f;
+        [Tooltip("Seconds to fade it out on resume. Quicker than in — coming " +
+                 "back is a deliberate act the participant has agreed to.")]
+        [Range(0f, 5f)] public float tintFadeOutSeconds = 0.5f;
 
         [Header("Legacy")]
         [Tooltip("The hand-authored overlay this component used to toggle. " +
@@ -101,30 +99,25 @@ namespace Delphi.Motion
                  "permanently visible. Safe to clear once you delete it.")]
         public GameObject overlayRoot;
 
-        // ── Generated content ───────────────────────────────────────────
-        private GameObject _ringRoot;
-        private Transform _anchor;
+        private GameObject _bannerRoot;
         private Font _font;
-        private Material _textMat;
-
-        private GameObject _wipeQuad;
-        private Material _wipeMat;
-        private static readonly int SceneAlphaId = Shader.PropertyToID("_SceneAlpha");
-
-        // 1 = fully virtual, 0 = fully passthrough. Ramped, never snapped.
-        private float _sceneAlpha = 1f;
         private bool _stopped;
-        private bool _passthroughOn;
-        private bool _mrChecked, _mrAvailable;
 
-        // Signature of everything the ring's geometry depends on, so an edit in
-        // the Inspector rebuilds it in Play mode instead of needing a restart.
+        // Signature of everything the banner's geometry depends on, so an edit
+        // in the Inspector rebuilds it in Play mode instead of needing a
+        // restart.
         private string _builtSig;
 
-        /// <summary>Layout pixels per ring segment. Arbitrary — the segment is
-        /// scaled to its arc afterwards — but fixed, so the font size means the
-        /// same thing whatever the radius is.</summary>
-        private const int SegmentPixelW = 600, SegmentPixelH = 150;
+        /// <summary>Font size the banner is always laid out at, in canvas
+        /// pixels. Arbitrary — the canvas is then scaled to the requested size
+        /// in metres — but FIXED, so the glyph mesh has the same resolution
+        /// whatever size the banner is asked to be.</summary>
+        private const int BannerFontSize = 100;
+
+        /// <summary>Cap height as a fraction of the requested font size for the
+        /// built-in legacy font. Only used to turn metres into a canvas
+        /// scale.</summary>
+        private const float CapHeightRatio = 0.72f;
 
         private void Awake()
         {
@@ -157,201 +150,262 @@ namespace Delphi.Motion
         {
             if (session == null) return;
 
-            bool shouldStop = session.CurrentPhase == SessionController.Phase.EmergencyStop;
-            if (shouldStop != _stopped)
+            _stopped = session.CurrentPhase == SessionController.Phase.EmergencyStop;
+
+            // Rebuilt live WHILE stopped so the message, size and placement can
+            // be dialled in against the headset instead of by re-triggering an
+            // emergency stop for every adjustment. EnsureBanner returns
+            // immediately unless something actually changed.
+            if (_stopped) EnsureBanner();
+
+            if (_bannerRoot != null && _bannerRoot.activeSelf != _stopped)
+                _bannerRoot.SetActive(_stopped);
+
+            TickTint();
+        }
+
+        // ── Screen tint ─────────────────────────────────────────────────
+
+        private Image _tintImg;
+        private float _tintAlpha;
+
+        /// <summary>Ramps the full-view colour wash.
+        ///
+        /// Driven from the phase every frame rather than switched on and off at
+        /// the transitions, so a stop that ends while the tint is still fading
+        /// in simply turns around from wherever it got to — no state to get
+        /// stuck, and no way to leave the participant looking at a red world
+        /// after the session resumed.</summary>
+        private void TickTint()
+        {
+            if (!useTint)
             {
-                _stopped = shouldStop;
-                if (_stopped) EnterStop(); else ExitStop();
+                if (_tintImg != null && _tintImg.gameObject.activeSelf)
+                    _tintImg.gameObject.SetActive(false);
+                return;
             }
 
-            // Rebuilt live WHILE stopped so the message, radius and repeat
-            // count can be dialled in against the headset instead of by
-            // restarting into an emergency stop for every adjustment.
-            // EnsureRing returns immediately unless something actually changed.
-            if (_stopped) EnsureRing();
+            float target = _stopped ? Mathf.Clamp01(tintStrength) : 0f;
+            float seconds = _stopped ? tintFadeInSeconds : tintFadeOutSeconds;
 
-            if (_ringRoot != null && _ringRoot.activeSelf != _stopped)
-                _ringRoot.SetActive(_stopped);
-
-            TickFade();
-        }
-
-        // ── Enter / exit ────────────────────────────────────────────────
-
-        private void EnterStop()
-        {
-            EnsureRing();
-            EnsureWipe();
-
-            // Passthrough comes up BEFORE the alpha starts moving. Starting VST
-            // rendering takes the compositor a moment; if the scene alpha were
-            // already falling, the participant would get a window of blended
-            // nothing — the virtual world half gone and the room not yet there.
-            if (usePassthrough && MrAvailable())
-            {
-                VarjoMixedReality.StartRender();
-                VarjoRendering.SetOpaque(false);
-                _passthroughOn = true;
-            }
-
-            if (_wipeQuad != null) _wipeQuad.SetActive(_passthroughOn);
-        }
-
-        private void ExitStop()
-        {
-            // The scene fades back in first and the compositor is only told to
-            // go opaque once it has (see TickFade) — dropping passthrough at
-            // alpha 0 would black the headset out for the frames in between.
-        }
-
-        private void TickFade()
-        {
-            float target = _stopped ? Mathf.Clamp01(finalSceneOpacity) : 1f;
-            float seconds = _stopped ? fadeSeconds : restoreSeconds;
-
-            _sceneAlpha = seconds <= 0.001f
+            _tintAlpha = seconds <= 0.001f
                 ? target
-                : Mathf.MoveTowards(_sceneAlpha, target, Time.unscaledDeltaTime / seconds);
+                : Mathf.MoveTowards(_tintAlpha, target,
+                                    Mathf.Max(0.0001f, tintStrength) * Time.unscaledDeltaTime / seconds);
 
-            if (_wipeMat != null) _wipeMat.SetFloat(SceneAlphaId, _sceneAlpha);
-
-            // Fully virtual again — hand the compositor back its fast path.
-            // Left non-opaque, every frame of the rest of the session would be
-            // alpha-blended against the cameras for no reason.
-            if (_passthroughOn && !_stopped && _sceneAlpha >= 0.999f)
+            if (_tintAlpha <= 0.0005f && !_stopped)
             {
-                VarjoRendering.SetOpaque(true);
-                VarjoMixedReality.StopRender();
-                _passthroughOn = false;
-                if (_wipeQuad != null) _wipeQuad.SetActive(false);
+                // Fully clear: take it out of the render entirely rather than
+                // leaving a transparent full-screen quad drawing every frame
+                // for the whole session.
+                if (_tintImg != null && _tintImg.gameObject.activeSelf)
+                    _tintImg.gameObject.SetActive(false);
+                return;
             }
+
+            EnsureTint();
+            if (_tintImg == null) return;
+
+            if (!_tintImg.gameObject.activeSelf) _tintImg.gameObject.SetActive(true);
+            _tintImg.color = new Color(tintColor.r, tintColor.g, tintColor.b, _tintAlpha);
         }
 
-        private bool MrAvailable()
+        /// <summary>A plain coloured canvas pinned just past the camera's near
+        /// plane.
+        ///
+        /// HEAD-LOCKED ON PURPOSE, which is the opposite of the rule the sign
+        /// follows. A head-locked IMAGE is uncomfortable because it has detail
+        /// the eyes try to fix on while the world moves behind it; a uniform
+        /// wash has no detail and no disparity cues, so there is nothing to
+        /// converge on and nothing to fight. It also has to be head-locked to
+        /// do its job — a tint you can look away from is not a tint.
+        ///
+        /// Sat just past the near plane so no cockpit geometry can poke through
+        /// it, and oversized because the per-eye FOV in the headset is the XR
+        /// system's, not Camera.fieldOfView's.</summary>
+        private void EnsureTint()
         {
-            // Cached: IsMRAvailable is a native call, and the answer cannot
-            // change during a session — the headset is not hot-swapped.
-            if (_mrChecked) return _mrAvailable;
-            _mrChecked = true;
-            try { _mrAvailable = VarjoMixedReality.IsMRAvailable(); }
-            catch (System.Exception e)
-            {
-                _mrAvailable = false;
-                Debug.LogWarning("[SafetyStopOverlay] Varjo mixed reality unavailable — the stop banner " +
-                                 "will show without passthrough. " + e.Message, this);
-            }
-            if (!_mrAvailable)
-                Debug.Log("[SafetyStopOverlay] No mixed-reality hardware; showing the banner only. " +
-                          "Normal on the desktop path.", this);
-            return _mrAvailable;
+            if (_tintImg != null || participantCamera == null) return;
+
+            float d = Mathf.Max(0.05f, participantCamera.nearClipPlane * 1.2f);
+
+            var go = new GameObject("Safety Stop Tint (generated)", typeof(Canvas));
+            go.transform.SetParent(participantCamera.transform, false);
+            go.transform.localPosition = new Vector3(0f, 0f, d);
+            go.transform.localRotation = Quaternion.identity;
+
+            var canvas = go.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.WorldSpace;
+            canvas.worldCamera = participantCamera;
+            // Above the sign's canvas, so the wash sits over the message too —
+            // it is a tint on the whole view, not on the world behind the sign.
+            canvas.sortingOrder = 32000;
+
+            const float Px = 100f;
+            var crt = go.GetComponent<RectTransform>();
+            crt.sizeDelta = new Vector2(Px, Px);
+            // Six near-plane distances across covers about ±71°, comfortably
+            // past any headset FOV.
+            go.transform.localScale = Vector3.one * (d * 6f / Px);
+
+            var imgGO = new GameObject("Tint", typeof(Image));
+            imgGO.transform.SetParent(go.transform, false);
+            _tintImg = imgGO.GetComponent<Image>();
+            _tintImg.raycastTarget = false;
+            _tintImg.color = new Color(tintColor.r, tintColor.g, tintColor.b, _tintAlpha);
+
+            var irt = _tintImg.rectTransform;
+            irt.anchorMin = Vector2.zero; irt.anchorMax = Vector2.one;
+            irt.offsetMin = irt.offsetMax = Vector2.zero;
         }
 
-        private void OnDisable()
-        {
-            // Never leave the compositor blending against the cameras because
-            // the component happened to be switched off mid-stop.
-            if (!_passthroughOn) return;
-            VarjoRendering.SetOpaque(true);
-            VarjoMixedReality.StopRender();
-            _passthroughOn = false;
-        }
+        // ── Construction ────────────────────────────────────────────────
 
-        // ── The 360° banner ─────────────────────────────────────────────
-
-        /// <summary>Builds (or rebuilds) the ring. Cheap to call — it returns
-        /// immediately unless something it depends on actually changed, which
-        /// is what lets the Inspector fields be dragged in Play mode.</summary>
-        private void EnsureRing()
+        private void EnsureBanner()
         {
-            string sig = $"{bannerText}|{separator}|{repeatCount}|{ringRadiusMeters}|" +
-                         $"{ringHeightMeters}|{textHeightMeters}|{ColorUtility.ToHtmlStringRGBA(textColor)}";
-            if (_ringRoot != null && sig == _builtSig) return;
+            string sig = $"{bannerStyle}|{bannerText}|{separator}|{loopCount}|" +
+                         $"{signDistanceMeters}|{signWidthMeters}|{signHeightMeters}|" +
+                         $"{ringRadiusMeters}|{ringHeightMeters}|{textHeightMeters}|" +
+                         $"{ColorUtility.ToHtmlStringRGBA(textColor)}";
+            if (_bannerRoot != null && sig == _builtSig) return;
             _builtSig = sig;
 
             // Hidden before Destroy, which is deferred to the end of the frame:
-            // otherwise the outgoing ring draws over the incoming one for a
+            // otherwise the outgoing banner draws over the incoming one for a
             // frame every time a field is nudged.
-            if (_ringRoot != null) { _ringRoot.SetActive(false); Destroy(_ringRoot); }
+            if (_bannerRoot != null) { _bannerRoot.SetActive(false); Destroy(_bannerRoot); }
 
-            _anchor = ResolveAnchor();
-            if (_anchor == null)
+            var anchor = ResolveAnchor();
+            if (anchor == null)
             {
                 Debug.LogWarning("[SafetyStopOverlay] No seat reference or participant camera — the stop " +
                                  "banner has nowhere to anchor and will not appear.", this);
                 return;
             }
 
-            _ringRoot = new GameObject("Safety Stop Banner (generated)");
-            _ringRoot.transform.SetParent(_anchor, false);
-            _ringRoot.transform.localPosition = new Vector3(0f, ringHeightMeters, 0f);
-            _ringRoot.transform.localRotation = Quaternion.identity;
+            bool sign = bannerStyle == BannerStyle.SignInFront;
 
-            int n = Mathf.Clamp(repeatCount, 3, 40);
-            float radius = Mathf.Max(0.3f, ringRadiusMeters);
+            _bannerRoot = new GameObject("Safety Stop Banner (generated)");
+            _bannerRoot.transform.SetParent(anchor, false);
+            _bannerRoot.transform.localPosition =
+                new Vector3(0f, sign ? signHeightMeters : ringHeightMeters, 0f);
+            _bannerRoot.transform.localRotation = Quaternion.identity;
 
-            // Segment width comes from the CIRCUMFERENCE, not from the text, so
-            // the repeats tile the full 360° exactly however many there are.
-            // Sizing segments to their content instead would leave a wedge of
-            // empty ring wherever the arithmetic did not come out even — i.e. a
-            // direction the participant can face and see no message at all.
-            float arcWidth = 2f * Mathf.PI * radius / n;
-            float scale = arcWidth / SegmentPixelW;
+            if (sign) BuildSign(); else BuildRing();
 
-            string phrase = string.IsNullOrEmpty(bannerText) ? "EMERGENCY STOP" : bannerText;
-            string content = phrase + separator;
-
-            // Cap height in metres → font size in layout pixels. Legacy fonts
-            // render caps at roughly 0.72 of the requested size.
-            int fontSize = Mathf.Clamp(
-                Mathf.RoundToInt(Mathf.Max(0.02f, textHeightMeters) / Mathf.Max(scale, 1e-6f) / 0.72f),
-                8, 400);
-
-            EnsureTextMaterial();
-
-            for (int i = 0; i < n; i++)
-            {
-                float deg = 360f * i / n;
-
-                var segment = new GameObject($"Segment_{i}", typeof(Canvas));
-                segment.transform.SetParent(_ringRoot.transform, false);
-
-                var canvas = segment.GetComponent<Canvas>();
-                canvas.renderMode = RenderMode.WorldSpace;
-                canvas.worldCamera = participantCamera;
-
-                var crt = segment.GetComponent<RectTransform>();
-                crt.sizeDelta = new Vector2(SegmentPixelW, SegmentPixelH);
-
-                // Face INWARD: the participant is at the centre looking out, so
-                // each panel is rotated to present its front to the middle.
-                var rot = Quaternion.Euler(0f, deg, 0f);
-                segment.transform.localRotation = rot;
-                segment.transform.localPosition = rot * new Vector3(0f, 0f, radius);
-                segment.transform.localScale = Vector3.one * scale;
-
-                var t = new GameObject("Text", typeof(Text));
-                t.transform.SetParent(segment.transform, false);
-                var txt = t.GetComponent<Text>();
-                txt.text = content;
-                txt.font = _font;
-                txt.fontSize = fontSize;
-                txt.fontStyle = FontStyle.Bold;
-                txt.color = textColor;
-                txt.alignment = TextAnchor.MiddleCenter;
-                txt.horizontalOverflow = HorizontalWrapMode.Overflow;
-                txt.verticalOverflow = VerticalWrapMode.Overflow;
-                txt.raycastTarget = false;
-                // Draws after the passthrough wipe and ignores depth — see the
-                // shader's own notes for why neither is optional here.
-                txt.material = _textMat;
-
-                var trt = t.GetComponent<RectTransform>();
-                trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one;
-                trt.offsetMin = trt.offsetMax = Vector2.zero;
-            }
-
-            _ringRoot.SetActive(_stopped);
+            _bannerRoot.SetActive(_stopped);
         }
+
+        /// <summary>One flat sign straight ahead, on a dark plate with a
+        /// coloured rule under the text.
+        ///
+        /// The plate matters more than it looks. Unbacked coloured text over
+        /// whatever happens to be behind it — a bright sky, a pale wall — is
+        /// the one case where the message becomes illegible, and it is not
+        /// predictable from the Editor because it depends where the car
+        /// stopped. A dark panel makes the contrast the sign's own property
+        /// rather than the scene's.</summary>
+        private void BuildSign()
+        {
+            string phrase = string.IsNullOrEmpty(bannerText) ? "EMERGENCY STOP" : bannerText;
+
+            var canvasGO = NewCanvas("Sign");
+            canvasGO.transform.localRotation = Quaternion.identity;
+
+            var txt = NewBannerText(canvasGO.transform, phrase);
+
+            // THE PLATE IS SIZED TO THE MESSAGE, and the whole thing is then
+            // scaled to signWidthMeters. Authoring a width in metres and
+            // letting the lettering follow is the right way round: a fixed
+            // pixel plate with metre-sized type meant a longer message silently
+            // grew a four-metre sign that ran past the edge of vision.
+            float plateW = txt.preferredWidth + BannerFontSize * 1.4f;
+            float plateH = BannerFontSize * 2.1f;
+            float scale = Mathf.Max(0.05f, signWidthMeters) / Mathf.Max(1f, plateW);
+
+            canvasGO.transform.localPosition = new Vector3(0f, 0f, Mathf.Max(0.2f, signDistanceMeters));
+            canvasGO.transform.localScale = Vector3.one * scale;
+            ((RectTransform)canvasGO.transform).sizeDelta = new Vector2(plateW, plateH);
+
+            var plate = NewSignImage(canvasGO.transform, new Color(0.03f, 0.04f, 0.06f, 0.88f));
+            var prt = plate.rectTransform;
+            prt.anchorMin = Vector2.zero; prt.anchorMax = Vector2.one;
+            prt.offsetMin = prt.offsetMax = Vector2.zero;
+            plate.transform.SetAsFirstSibling();          // behind the lettering
+
+            var rule = NewSignImage(canvasGO.transform, textColor);
+            var rrt = rule.rectTransform;
+            rrt.anchorMin = rrt.anchorMax = new Vector2(0.5f, 0f);
+            rrt.pivot = new Vector2(0.5f, 0f);
+            rrt.anchoredPosition = new Vector2(0f, plateH * 0.16f);
+            rrt.sizeDelta = new Vector2(plateW - BannerFontSize, BannerFontSize * 0.07f);
+
+            var trt = txt.rectTransform;
+            trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one;
+            trt.offsetMin = new Vector2(0f, plateH * 0.12f); trt.offsetMax = Vector2.zero;
+            txt.transform.SetAsLastSibling();
+        }
+
+        /// <summary>The phrase repeated and bent into a closed circle by
+        /// RingTextWrap — ONE string on ONE canvas centred on the participant,
+        /// not a carousel of panels each holding its own copy.</summary>
+        private void BuildRing()
+        {
+            string phrase = string.IsNullOrEmpty(bannerText) ? "EMERGENCY STOP" : bannerText;
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < Mathf.Clamp(loopCount, 1, 20); i++) sb.Append(phrase).Append(separator);
+
+            // METRES → CANVAS SCALE, from the cap height alone. The font size is
+            // fixed and the canvas is scaled to suit, rather than the other way
+            // round, so changing the radius moves the ring without
+            // re-rasterising the font atlas.
+            float scale = Mathf.Max(1e-6f, textHeightMeters) / (BannerFontSize * CapHeightRatio);
+            float radiusPixels = Mathf.Max(0.3f, ringRadiusMeters) / scale;
+
+            var canvasGO = NewCanvas("Ring");
+            canvasGO.transform.localPosition = Vector3.zero;   // centred ON the participant
+            canvasGO.transform.localRotation = Quaternion.identity;
+            canvasGO.transform.localScale = Vector3.one * scale;
+
+            // Sized to enclose the whole ring even though nothing is drawn on
+            // it: the canvas rect is what Unity culls against, and a small rect
+            // around geometry pushed out to the radius can vanish when the
+            // participant looks away from the origin.
+            ((RectTransform)canvasGO.transform).sizeDelta =
+                new Vector2(radiusPixels * 2f, radiusPixels * 2f);
+
+            var txt = NewBannerText(canvasGO.transform, sb.ToString());
+            var trt = txt.rectTransform;
+            trt.anchorMin = trt.anchorMax = trt.pivot = new Vector2(0.5f, 0.5f);
+            trt.anchoredPosition = Vector2.zero;
+            trt.sizeDelta = new Vector2(radiusPixels * 2f, BannerFontSize * 2f);
+
+            txt.gameObject.AddComponent<RingTextWrap>().radiusPixels = radiusPixels;
+
+            WarnIfCrowded(txt, radiusPixels);
+        }
+
+        /// <summary>Says out loud how hard the letters are being squeezed or
+        /// stretched to close the ring.
+        ///
+        /// Loop count, radius and cap height are three independent fields that
+        /// jointly decide one thing — how much text has to fit into a fixed
+        /// circumference — so any two can silently make the third unreadable.
+        /// The wrap always closes, which is why the problem is invisible until
+        /// someone is wearing the headset: it never looks broken, it just looks
+        /// wrong.</summary>
+        private static void WarnIfCrowded(Text txt, float radiusPixels)
+        {
+            float fit = RingTextWrap.FitFactor(2f * Mathf.PI * radiusPixels, txt.preferredWidth);
+            if (fit >= 0.6f && fit <= 1.8f) return;
+
+            string advice = fit < 0.6f
+                ? "letters are crowded — lower Loop Count, lower Text Height, or raise Ring Radius"
+                : "letters are stretched thin — raise Loop Count, raise Text Height, or lower Ring Radius";
+            Debug.LogWarning($"[SafetyStopOverlay] Ring letter spacing is {fit:0.00}x natural: {advice}.");
+        }
+
+        // ── Helpers ─────────────────────────────────────────────────────
 
         /// <summary>The driver's eye point fixed to the car — never the head.
         /// See the class summary.</summary>
@@ -365,67 +419,45 @@ namespace Delphi.Motion
             return participantCamera != null ? participantCamera.transform : null;
         }
 
-        private void EnsureTextMaterial()
+        private GameObject NewCanvas(string name)
         {
-            if (_textMat != null) return;
-            var sh = Shader.Find("Delphi/SafetyStopText");
-            if (sh == null)
-            {
-                Debug.LogWarning("[SafetyStopOverlay] Shader 'Delphi/SafetyStopText' not found — the banner " +
-                                 "will use the default UI material, so it can be hidden behind the car and " +
-                                 "will fade out with the scene. Check the shader is in the project and, for " +
-                                 "a build, listed under Project Settings > Graphics > Always Included Shaders.",
-                                 this);
-                return;
-            }
-            _textMat = new Material(sh) { hideFlags = HideFlags.HideAndDontSave };
+            var go = new GameObject(name, typeof(Canvas));
+            go.transform.SetParent(_bannerRoot.transform, false);
+            var canvas = go.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.WorldSpace;
+            canvas.worldCamera = participantCamera;
+            return go;
         }
 
-        // ── The passthrough wipe ────────────────────────────────────────
-
-        /// <summary>A quad parented to the camera whose only job is to write
-        /// the framebuffer alpha the Varjo compositor blends on.
-        ///
-        /// Deliberately oversized rather than fitted to the frustum: in VR the
-        /// per-eye projection is the XR system's, not Camera.fieldOfView's, so
-        /// a quad sized from the Camera would leave an unfaded border in the
-        /// headset while looking perfectly correct in the Editor. It writes
-        /// alpha only and ignores depth, so the overspill costs nothing.</summary>
-        private void EnsureWipe()
+        private Text NewBannerText(Transform parent, string content)
         {
-            if (_wipeQuad != null || participantCamera == null) return;
+            var go = new GameObject("Text", typeof(Text));
+            go.transform.SetParent(parent, false);
+            var t = go.GetComponent<Text>();
+            t.text = content;
+            t.font = _font;
+            t.fontSize = BannerFontSize;
+            t.fontStyle = FontStyle.Bold;
+            t.color = textColor;
+            t.alignment = TextAnchor.MiddleCenter;
+            t.horizontalOverflow = HorizontalWrapMode.Overflow;
+            t.verticalOverflow = VerticalWrapMode.Overflow;
+            t.raycastTarget = false;
+            return t;
+        }
 
-            var sh = Shader.Find("Delphi/SafetyStopPassthroughWipe");
-            if (sh == null)
-            {
-                Debug.LogWarning("[SafetyStopOverlay] Shader 'Delphi/SafetyStopPassthroughWipe' not found — " +
-                                 "the banner will show but the room will not fade in. For a build, add it " +
-                                 "to Project Settings > Graphics > Always Included Shaders.", this);
-                return;
-            }
-
-            _wipeMat = new Material(sh) { hideFlags = HideFlags.HideAndDontSave };
-            _wipeMat.SetFloat(SceneAlphaId, _sceneAlpha);
-
-            _wipeQuad = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            _wipeQuad.name = "Passthrough Wipe (generated)";
-            var col = _wipeQuad.GetComponent<Collider>();
-            if (col != null) Destroy(col);   // a full-screen collider would eat every raycast in the scene
-
-            _wipeQuad.transform.SetParent(participantCamera.transform, false);
-            float d = Mathf.Max(0.05f, participantCamera.nearClipPlane * 2f);
-            _wipeQuad.transform.localPosition = new Vector3(0f, 0f, d);
-            _wipeQuad.transform.localRotation = Quaternion.identity;
-            _wipeQuad.transform.localScale = Vector3.one * (d * 12f);   // covers past any plausible FOV
-
-            var mr = _wipeQuad.GetComponent<MeshRenderer>();
-            mr.sharedMaterial = _wipeMat;
-            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            mr.receiveShadows = false;
-            mr.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
-            mr.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
-
-            _wipeQuad.SetActive(false);
+        /// <summary>Plain image on the sign. Sibling ORDER decides what covers
+        /// what inside a canvas — not depth — so the plate is made the first
+        /// child and the text the last, and no material trickery is needed to
+        /// keep the backing behind the lettering.</summary>
+        private static Image NewSignImage(Transform parent, Color c)
+        {
+            var go = new GameObject("Img", typeof(Image));
+            go.transform.SetParent(parent, false);
+            var img = go.GetComponent<Image>();
+            img.color = c;
+            img.raycastTarget = false;
+            return img;
         }
     }
 }
