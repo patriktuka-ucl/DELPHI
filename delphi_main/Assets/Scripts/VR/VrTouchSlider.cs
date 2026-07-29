@@ -45,9 +45,33 @@ namespace Delphi.VR
         [Range(0f, 1f)] public float Value { get; private set; } = 0.5f;
         public UnityEvent<float> onValueChanged = new();
 
-        /// <summary>How near the panel plane a fingertip must be to engage,
-        /// in metres. Generous on purpose — see the class summary.</summary>
+        /// <summary>How near the panel plane a fingertip must STAY to keep
+        /// driving, in metres. Generous on purpose — see the class summary.</summary>
         public float touchDepthMeters = 0.045f;
+
+        /// <summary>How near it must come to START driving, in metres.
+        ///
+        /// TIGHTER THAN THE HOLD DEPTH, DELIBERATELY. With one threshold for
+        /// both, the whole 9 cm slab around the panel is live, and a hand
+        /// crossing that slab on its way to something else answers whatever
+        /// question it passed over — the participant then finds the question
+        /// already answered and SUBMIT already lit, by them, without their
+        /// knowledge. That is a data-integrity bug, not a comfort one: it
+        /// writes a rating nobody gave into a session file.
+        ///
+        /// So engaging takes a deliberate reach to the surface, while STAYING
+        /// engaged stays forgiving — which is the asymmetry the interaction
+        /// actually wants.</summary>
+        public float engageDepthMeters = 0.022f;
+
+        /// <summary>Number of discrete positions, or 0 for continuous.
+        ///
+        /// A 21-point scale drawn as 21 separate dot targets would be roughly
+        /// finger-width each and unhittable with tracking jitter. A continuous
+        /// track that SNAPS is the same ordinal data and a far larger target:
+        /// the participant slides to about the right place and the value lands
+        /// on a step.</summary>
+        public int steps;
 
         private RectTransform _row;      // the interactive area (bigger than the visible track)
         private RectTransform _track, _fill, _knob, _halo;
@@ -99,13 +123,16 @@ namespace Delphi.VR
             // Scale ticks. Instrument panels read as instruments largely
             // because they are graduated — five marks turn an abstract bar
             // into something with a scale you can aim at.
-            for (int i = 0; i <= 4; i++)
+            int tickCount = steps > 1 ? steps : 5;
+            for (int i = 0; i < tickCount; i++)
             {
+                float f = i / (float)(tickCount - 1);
                 var tick = NewImage(_track, "Tick", out var tickImg, sliced: false);
-                tickImg.color = new Color(1f, 1f, 1f, i == 0 || i == 4 ? 0.30f : 0.16f);
-                tick.anchorMin = new Vector2(i / 4f, 0.5f);
-                tick.anchorMax = new Vector2(i / 4f, 0.5f);
-                tick.sizeDelta = new Vector2(2f, trackHeight + 16f);
+                bool end = i == 0 || i == tickCount - 1;
+                tickImg.color = new Color(1f, 1f, 1f, end ? 0.34f : 0.14f);
+                tick.anchorMin = new Vector2(f, 0.5f);
+                tick.anchorMax = new Vector2(f, 0.5f);
+                tick.sizeDelta = new Vector2(end ? 3f : 2f, trackHeight + (end ? 18f : 10f));
                 tick.anchoredPosition = Vector2.zero;
             }
 
@@ -131,13 +158,57 @@ namespace Delphi.VR
             SetValue(Value, notify: false);
         }
 
+        /// <summary>Puts the control into a visibly UNANSWERED state: no knob,
+        /// no fill, a dash for a readout.
+        ///
+        /// A scale sitting at its midpoint is indistinguishable from a
+        /// participant who chose the midpoint, and that ambiguity is not
+        /// recoverable afterwards — the data would contain a deliberate
+        /// neutral answer that nobody gave. So an untouched scale shows
+        /// nothing at all.</summary>
+        public void SetUnanswered()
+        {
+            _answered = false;
+            Value = 0.5f;
+            if (_fill != null) _fill.anchorMax = new Vector2(0f, 1f);
+            if (_knob != null) _knob.gameObject.SetActive(false);
+            if (_halo != null) _halo.gameObject.SetActive(false);
+            if (_valueText != null) _valueText.text = "–";
+        }
+
+        private bool _answered = true;
+
+        /// <summary>Drops any drag in progress, so the next contact has to
+        /// start over from the tighter engage depth.
+        ///
+        /// Called when the page under the slider changes. A finger still near
+        /// the panel from the press that TURNED the page is otherwise treated
+        /// as a continuing drag, and the first thing it does is write a value
+        /// into the question that just appeared — which the participant has not
+        /// read yet, let alone answered. The visible symptom is a fresh page
+        /// arriving with SUBMIT already lit.</summary>
+        public void ForceRelease()
+        {
+            if (!_engaged) return;
+            _engaged = false;
+            Restyle();
+        }
+
         /// <summary>Attaches the numeric readout this slider keeps updated.</summary>
         public void BindValueLabel(Text label) { _valueText = label; SetValue(Value, false); }
 
         public void SetValue(float v, bool notify)
         {
             v = Mathf.Clamp01(v);
-            bool changed = !Mathf.Approximately(v, Value);
+            if (steps > 1) v = Mathf.Round(v * (steps - 1)) / (steps - 1);
+            bool changed = !Mathf.Approximately(v, Value) || !_answered;
+
+            if (!_answered)
+            {
+                _answered = true;
+                if (_knob != null) _knob.gameObject.SetActive(true);
+                if (_halo != null) _halo.gameObject.SetActive(true);
+            }
             Value = v;
 
             if (_fill != null) _fill.anchorMax = new Vector2(v, 1f);
@@ -149,7 +220,10 @@ namespace Delphi.VR
                 _knob.anchoredPosition = pos;
                 if (_halo != null) _halo.anchoredPosition = pos; // glow follows the knob
             }
-            if (_valueText != null) _valueText.text = v.ToString("0.00");
+            if (_valueText != null)
+                _valueText.text = steps > 1
+                    ? Mathf.RoundToInt(v * (steps - 1) + 1).ToString()   // 1..steps, as answered
+                    : v.ToString("0.00");
 
             if (changed && notify) onValueChanged.Invoke(v);
         }
@@ -165,7 +239,7 @@ namespace Delphi.VR
             // Depth is in metres; the canvas is scaled metres-per-pixel, so
             // convert the tolerance through the row's own scale.
             float scale = Mathf.Abs(_row.lossyScale.z) > 1e-6f ? Mathf.Abs(_row.lossyScale.z) : 1f;
-            float depthLocal = touchDepthMeters / scale;
+            float depthLocal = (_engaged ? touchDepthMeters : Mathf.Min(engageDepthMeters, touchDepthMeters)) / scale;
 
             var r = _row.rect;
             bool inside = local.x >= r.xMin && local.x <= r.xMax

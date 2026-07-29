@@ -1,0 +1,3 @@
+UserID;ConditionID;GroupID;Timestamp;Iteration;Phase;IsPareto;trust;predictability;efficiency;satisfaction;perceivedSafety;comfort;risk;accelerationJerk;brakingJerk;followDistance;corneringSpeed
+P0;explicit;4;2026-07-29 01:12:36;1;sampling;FALSE;10.0;8.0;11.0;16.0;8.0;16.0;6.0;0.068;0.225;0.699;0.063
+P0;explicit;4;2026-07-29 01:12:59;2;sampling;FALSE;8.0;15.0;9.0;14.0;7.0;8.0;14.0;0.375;0.03;0.147;0.339

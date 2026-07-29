@@ -196,13 +196,19 @@ namespace Delphi.Session
         public float returnToNeutralSeconds = 3f;
         [Tooltip("Plays the spoken instructions at each phase transition.")]
         public NarrationController narration;
-        [Tooltip("The per-iteration rating questionnaire, shown during Explicit " +
-                 "conditions' AwaitingRating phase.")]
-        public QTQuestionnaireManager questionnaire;
-        [Tooltip("The post-condition evaluation questionnaire. Shown the " +
-                 "instant each drive ends, while the car resets to start in " +
-                 "the background — see EnterQuestionnaire.")]
-        public QTQuestionnaireManager finalEvaluationQuestionnaire;
+        
+
+        [Tooltip("DELPHI's own per-trial questionnaire — the Explicit " +
+                 "condition's objectives. Replaces the QT manager above.")]
+        public DelphiQuestionnaire delphiQuestionnaire;
+        [Tooltip("Its VR panel. Shown at AwaitingRating, hidden on submit.")]
+        public VR.VrQuestionnairePanel delphiQuestionnairePanel;
+        [Tooltip("Post-condition evaluation. RECORDED ONLY — never sent to " +
+                 "the optimizer, because it rates a whole condition and the " +
+                 "optimizer scores single iterations.")]
+        public DelphiQuestionnaire conditionEvaluation;
+        public VR.VrQuestionnairePanel conditionEvaluationPanel;
+        
 
         // ── Set by ExperimentUI at runtime, not Inspector-configured ─────
         // (a researcher picks these fresh per participant/session, not once
@@ -444,11 +450,10 @@ namespace Delphi.Session
             if (narration == null)  narration  = FindFirstObjectByType<NarrationController>();
             if (motionCues == null) motionCues = FindFirstObjectByType<Delphi.Motion.CarMotionCues>();
 
-            // Auto-advance past Phase.Questionnaire once the participant
-            // submits — no researcher button click needed, unlike the
-            // "no questionnaire linked" fallback path in EnterSegment.
-            if (finalEvaluationQuestionnaire != null)
-                finalEvaluationQuestionnaire.onQuestionnaireFinished.AddListener(ConfirmQuestionnaire);
+            // Phase.Questionnaire now advances from the condition-evaluation
+            // panel's own submit (see OnConditionEvaluationSubmitted), so
+            // there is no listener to attach here. The researcher fallback in
+            // TickQuestionnaire still covers the case where no panel is linked.
 
             // Launch mobo.py the moment Play starts, not when a trial starts —
             // torch import (several seconds) happens while the researcher is
@@ -627,6 +632,66 @@ namespace Delphi.Session
             SetParam(carDriver.parameters, key, Mathf.Clamp01(value));
             _lastFreePlayActivity = DelphiClock.Now; // they're engaged — restart the idle countdown
             LogFreePlayRow();
+        }
+
+        /// <summary>Live manual control on ONE axis — "driving style", from
+        /// defensive (0) to aggressive (1) — by moving every driving parameter
+        /// together.
+        ///
+        /// This is only coherent because DrivingParameters holds a uniform
+        /// convention: 0 is gentle and 1 is assertive on EVERY axis (the two
+        /// that map to an inverted physical quantity, followDistance and
+        /// corneringSpeed, are already inverted inside their own mapping). So a
+        /// single scalar written to all four is a real point on the
+        /// defensive–aggressive diagonal, not an average of four unrelated
+        /// numbers.
+        ///
+        /// It exists rather than four SetFreePlayParameter calls because those
+        /// would write four log rows per frame of a drag and leave three
+        /// intermediate rows in the file where the car was in a state nobody
+        /// asked for. One call, one applied state, one row.</summary>
+        public void SetFreePlayStyle(float value)
+        {
+            if (carDriver == null)
+            {
+                Debug.LogWarning("[Trial] Driving style ignored — no CarDriver assigned.", this);
+                return;
+            }
+            if (CurrentPhase != Phase.FreePlay)
+            {
+                Debug.LogWarning($"[Trial] Driving style ignored — parameters are only adjustable during " +
+                                 $"FreePlay, and the session is in {CurrentPhase}. In the measured " +
+                                 "conditions the optimizer owns these values.", this);
+                return;
+            }
+
+            float v = Mathf.Clamp01(value);
+            foreach (string key in StyleParameterKeys) SetParam(carDriver.parameters, key, v);
+            _lastFreePlayActivity = DelphiClock.Now;
+            LogFreePlayRow();
+        }
+
+        /// <summary>The axes a single style scalar moves. Public so the
+        /// participant panel reads the style back out of the car from the same
+        /// list it wrote in with, instead of keeping its own copy that can
+        /// drift once a fifth parameter is added.</summary>
+        public static readonly string[] StyleParameterKeys =
+            { "accelerationJerk", "brakingJerk", "followDistance", "corneringSpeed" };
+
+        /// <summary>The car's current position on the defensive–aggressive
+        /// axis: the mean of the style parameters. While only SetFreePlayStyle
+        /// has written them they are all equal and this is exact; after a
+        /// per-parameter session, or an optimizer handoff, it is the nearest
+        /// single-scalar summary — which is the honest thing to show on a
+        /// one-slider panel.</summary>
+        public float CurrentFreePlayStyle
+        {
+            get
+            {
+                if (carDriver == null) return 0.5f;
+                var p = carDriver.parameters;
+                return (p.accelerationJerk + p.brakingJerk + p.followDistance + p.corneringSpeed) * 0.25f;
+            }
         }
 
         /// <summary>Play extra_exploreNudge — the "try changing something"
@@ -1114,20 +1179,88 @@ namespace Delphi.Session
                 _questionnaireUiShown = true;
                 _phaseEnd = 0;
 
-                if (finalEvaluationQuestionnaire != null)
+                if (conditionEvaluationPanel != null && conditionEvaluation != null)
                 {
-                    finalEvaluationQuestionnaire.StartQuestionnaire();
-                    StatusLine = "Evaluation questionnaire — waiting for participant";
+                    conditionEvaluation.Submitted -= OnConditionEvaluationSubmitted;
+                    conditionEvaluation.Submitted += OnConditionEvaluationSubmitted;
+                    conditionEvaluationPanel.Show();
+                    StatusLine = "Condition evaluation — waiting for participant";
                 }
                 else
                 {
+                    // No panel: fall back to the researcher advancing manually
+                    // rather than silently skipping the evaluation, which would
+                    // lose a condition's worth of data with no trace.
                     IsAwaitingResearcher = true;
-                    StatusLine = "Evaluation — waiting for participant (no QTQuestionnaireManager linked)";
+                    StatusLine = "Evaluation — waiting for researcher (no condition-evaluation panel linked)";
+                    Debug.LogWarning("[Trial] No condition-evaluation panel linked — this condition's " +
+                                     "evaluation will not be collected.", this);
                 }
                 return;
             }
 
             if (_questionnaireConfirmed) AdvanceToNextSegment();
+        }
+
+        /// <summary>Records the post-condition evaluation and lets the session
+        /// move on.
+        ///
+        /// RECORD-ONLY, BY DESIGN. These answers rate a whole condition, and
+        /// the optimizer scores single iterations — there is no iteration for
+        /// them to belong to, so they are never sent to mobo.py. They are
+        /// written for later analysis instead, which means they have to
+        /// actually reach disk: collected-and-discarded is the worst of both
+        /// worlds, since it looks like data was gathered.
+        ///
+        /// Raw 1..steps is what gets written, matching the per-trial log, so
+        /// both questionnaires are read the same way months from now.</summary>
+        private void OnConditionEvaluationSubmitted(Dictionary<string, float> _)
+        {
+            conditionEvaluation.Submitted -= OnConditionEvaluationSubmitted;
+            WriteConditionEvaluationRow();
+            _questionnaireConfirmed = true;   // releases TickQuestionnaire
+        }
+
+        /// <summary>Appends this condition's evaluation to a per-session CSV,
+        /// writing the header only when the file is first created so the three
+        /// conditions accumulate into one readable table.</summary>
+        private void WriteConditionEvaluationRow()
+        {
+            try
+            {
+                string dir = recorder != null && recorder.IsRecording
+                    ? recorder.CurrentSessionPath
+                    : Path.Combine(Application.persistentDataPath, "Trials");
+                Directory.CreateDirectory(dir);
+
+                string path = Path.Combine(dir, "condition_evaluation.csv");
+                bool isNew = !File.Exists(path);
+
+                using var w = new StreamWriter(path, append: true);
+                if (isNew)
+                {
+                    var header = new StringBuilder("userId,orderIndex,conditionNumber,conditionKind,t_s");
+                    foreach (var q in conditionEvaluation.questions)
+                        header.Append(',').Append(q.key).Append("_1to").Append(q.steps);
+                    w.WriteLine(header.ToString());
+                }
+
+                var row = new StringBuilder();
+                row.Append(userId).Append(',').Append(orderIndex).Append(',')
+                   .Append(ConditionNumber).Append(',').Append(CurrentConditionKind).Append(',')
+                   .Append(F((float)(DelphiClock.Now - _trialStart)));
+                foreach (var q in conditionEvaluation.questions)
+                    row.Append(',').Append(q.response);   // raw 1..steps, 0 if unanswered
+                w.WriteLine(row.ToString());
+
+                Debug.Log($"[Trial] Condition evaluation written to {path}", this);
+            }
+            catch (Exception e)
+            {
+                // Never let a disk problem strand the participant mid-session:
+                // the answer is lost, the session continues, and the log says so.
+                Debug.LogError($"[Trial] Could not write the condition evaluation: {e.Message}", this);
+            }
         }
 
         // ── Meditation = baseline ───────────────────────────────────────
@@ -1362,9 +1495,9 @@ namespace Delphi.Session
             // before anyone notices.
             if (_objectiveSource == ObjectiveSource.Questionnaire)
             {
-                if (questionnaire == null) { Fail("objectiveSource is Questionnaire but no QTQuestionnaireManager is linked."); return; }
-                int headerCount = questionnaire.resultsHeaderItems?.Count ?? 0;
-                if (headerCount < 2) { Fail("mobo.py needs ≥2 objectives — the linked questionnaire has fewer than 2 header items configured."); return; }
+                if (delphiQuestionnaire == null) { Fail("objectiveSource is Questionnaire but no DelphiQuestionnaire is linked."); return; }
+                int headerCount = delphiQuestionnaire.questions?.Count ?? 0;
+                if (headerCount < 2) { Fail("mobo.py needs ≥2 objectives — the linked DelphiQuestionnaire has fewer than 2 questions."); return; }
             }
             else if (CandidateChannels().Count < 2)
             {
@@ -1433,8 +1566,8 @@ namespace Delphi.Session
             if (_objectiveSource == ObjectiveSource.Questionnaire)
             {
                 _objectiveChannels = new List<Channel>();
-                _questionnaireKeys = questionnaire.resultsHeaderItems != null
-                    ? new List<string>(questionnaire.resultsHeaderItems)
+                _questionnaireKeys = delphiQuestionnaire != null
+                    ? delphiQuestionnaire.Keys
                     : new List<string>();
 
                 if (!_baselineCaptured)
@@ -1525,7 +1658,7 @@ namespace Delphi.Session
                     _pendingQuestionnaireValues.Clear();
                     carDriver?.FreezeInPlace(); // instant halt, not a drive to a (possibly distant) Park marker
                     motionCues?.FreezeInPlace(); // seat holds real forces exactly as they were, not neutralized
-                    questionnaire.StartQuestionnaire();
+                    ShowRatingPanel();
                 }
                 else
                 {
@@ -1636,9 +1769,18 @@ namespace Delphi.Session
                 // abstract number instead of the actual 1-7 rating.
                 // minimize=0: higher raw rating = better outcome.
                 objectiveKeys = _questionnaireKeys;
+                // INVERSION IS EXPRESSED AS minimize, NOT BY FLIPPING THE VALUE.
+                // Flipping in C# would make the CSV disagree with what the
+                // participant actually answered — the log would read 3 where
+                // they chose 19. mobo.py already takes a per-objective
+                // minimise flag, so the raw answer stays raw everywhere and
+                // only the optimizer's sense of "better" changes.
                 foreach (var key in objectiveKeys)
                 {
-                    string objInit = string.Format(CultureInfo.InvariantCulture, "{0},{1},{2}", questionnaireMin, questionnaireMax, 0);
+                    var q = delphiQuestionnaire.questions.Find(x => x.key == key);
+                    int minimize = q != null && q.inverted ? 1 : 0;
+                    string objInit = string.Format(CultureInfo.InvariantCulture, "{0},{1},{2}",
+                                                   questionnaireMin, questionnaireMax, minimize);
                     objectives.Add(new JObject { ["key"] = key, ["init"] = objInit });
                 }
             }
@@ -1861,6 +2003,52 @@ namespace Delphi.Session
         // car ever started driving toward this rating — nothing left to
         // start here.
         void IQuestionnaireOptimizationBridge.OptimizationStart() { }
+
+        /// <summary>Shows the per-trial rating panel and arms its submit.
+        ///
+        /// The handler is re-attached each time rather than once at startup so
+        /// it cannot fire for a stale iteration if the panel is rebuilt.</summary>
+        private void ShowRatingPanel()
+        {
+            if (delphiQuestionnairePanel == null)
+            {
+                Debug.LogError("[Trial] No questionnaire panel linked — the participant has no way to rate " +
+                               "this iteration and the trial cannot advance.", this);
+                return;
+            }
+
+            if (delphiQuestionnaire != null)
+            {
+                delphiQuestionnaire.Submitted -= OnRatingSubmitted;
+                delphiQuestionnaire.Submitted += OnRatingSubmitted;
+            }
+            delphiQuestionnairePanel.Show();
+        }
+
+        /// <summary>Takes the participant's answers and advances the trial.
+        ///
+        /// RAW 1..steps IS WHAT GOES TO THE OPTIMIZER, not the normalised
+        /// value. mobo.py validates each objective against the
+        /// [questionnaireMin, questionnaireMax] bounds it was told at init and
+        /// normalises internally — handing it an already-normalised number
+        /// would fail that bounds check outright, and normalising twice is
+        /// what corrupted the CSV in an earlier version of this code.
+        ///
+        /// It is also the number that belongs in the log: "17 out of 21" is
+        /// recoverable and interpretable years later; "0.8" is not.</summary>
+        private void OnRatingSubmitted(Dictionary<string, float> _)
+        {
+            if (CurrentPhase != Phase.AwaitingRating) return;   // stale panel, ignore
+
+            foreach (var q in delphiQuestionnaire.questions)
+                _pendingQuestionnaireValues[q.key] = q.response;   // raw 1..steps
+
+            delphiQuestionnaire.Submitted -= OnRatingSubmitted;
+            Debug.Log($"[Trial] Rating submitted for iteration {Iteration}: " +
+                      string.Join(", ", _pendingQuestionnaireValues.Select(kv => $"{kv.Key}={kv.Value:0}")), this);
+
+            ((IQuestionnaireOptimizationBridge)this).RequestNextIteration();
+        }
 
         void IQuestionnaireOptimizationBridge.RequestNextIteration()
         {

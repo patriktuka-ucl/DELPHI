@@ -192,7 +192,16 @@ namespace Delphi.VR
             _lastTip[slot] = tip;
             _hasLastTip[slot] = true;
 
-            // SLIDERS FIRST, and they get the fingertip exclusively.
+            // BUTTONS FIRST. They are the smallest, most deliberate targets on
+            // a panel and they sit in front of everything else, so a fingertip
+            // that is on one is not meant for whatever lies behind it.
+            for (int i = 0; i < VrTouchButton.Active.Count; i++)
+            {
+                var b = VrTouchButton.Active[i];
+                if (b != null && b.isActiveAndEnabled && b.TryPress(tip)) return;
+            }
+
+            // SLIDERS NEXT, and they get the fingertip exclusively.
             //
             // A slider needs CONTINUOUS input — the value follows the finger
             // for as long as it is near. The poke path below is a discrete

@@ -65,6 +65,31 @@ namespace Delphi
         [Range(1f, 40f)] public float overheadRouteWidth = 10f;
         private float _lastOverheadBallSize = -1f, _lastOverheadRouteWidth = -1f;
 
+        [Header("Sensor grid — camera feeds, live, drag while in Play mode")]
+        [Tooltip("Height of each video feed, in dashboard pixels. HEIGHT is the " +
+                 "size control, not width: every feed gets the same height and " +
+                 "keeps its own aspect, so a 16:9 player view, a 2:1 panorama " +
+                 "and an 8:3 eye pair sit on one baseline at comparable scale. " +
+                 "A common width would make the wide feeds short and the tall " +
+                 "ones huge, and nothing would line up.")]
+        [Range(48f, 400f)] public float frameHeightPixels = 132f;
+        [Tooltip("Widest a single feed may get before it would crowd its " +
+                 "neighbour. When this bites, height comes down with it so the " +
+                 "aspect ratio is never distorted — a stretched feed is the kind " +
+                 "of thing nobody notices until they measure something off it " +
+                 "months later.")]
+        [Range(80f, 800f)] public float frameMaxWidthPixels = 336f;
+        [Tooltip("Gap between a feed's heading block (its label and status line) " +
+                 "and the image itself, in pixels.")]
+        [Range(0f, 60f)] public float frameHeadingGapPixels = 0f;
+        [Tooltip("Horizontal gap between camera feeds, in pixels. The feed box " +
+                 "widens to match, so the cells stay inside it.")]
+        [Range(0f, 80f)] public float frameGapHorizontalPixels = 14f;
+        [Tooltip("Vertical gap between rows of camera feeds, in pixels.")]
+        [Range(0f, 80f)] public float frameGapVerticalPixels = 12f;
+        private float _lastFrameH = -1f, _lastFrameMaxW = -1f, _lastFrameHeadGap = -1f;
+        private float _lastFrameGapH = -1f, _lastFrameGapV = -1f;
+
         // ── Palette ─────────────────────────────────────────────────────
         private readonly Color _bg      = new Color(0.055f, 0.065f, 0.09f, 1f);
         private readonly Color _card    = new Color(0.10f, 0.12f, 0.17f, 1f);
@@ -122,6 +147,7 @@ namespace Delphi
             RefreshConnectionsCard();
             RefreshTransport();
             RefreshOverheadTuning();
+            RefreshFrameTuning();
             PollEvents();
 
             _redrawTimer += Time.deltaTime;
@@ -345,6 +371,50 @@ namespace Delphi
             overviewIndicators.ApplyTuning(overheadBallSize * 1.4f, overheadBallSize, overheadRouteWidth);
         }
 
+        /// <summary>Applies the camera-feed layout fields when they change, so
+        /// they can be dragged in Play mode against a live feed.
+        ///
+        /// Rebuilt on CHANGE rather than every frame: the cell rects and the
+        /// box only move when a number moves, and re-anchoring every feed at
+        /// the redraw rate would dirty the canvas continuously for a layout
+        /// that is identical 99.9% of the time.</summary>
+        private void RefreshFrameTuning()
+        {
+            if (Mathf.Approximately(frameHeightPixels, _lastFrameH) &&
+                Mathf.Approximately(frameMaxWidthPixels, _lastFrameMaxW) &&
+                Mathf.Approximately(frameHeadingGapPixels, _lastFrameHeadGap) &&
+                Mathf.Approximately(frameGapHorizontalPixels, _lastFrameGapH) &&
+                Mathf.Approximately(frameGapVerticalPixels, _lastFrameGapV))
+                return;
+
+            _lastFrameH = frameHeightPixels;
+            _lastFrameMaxW = frameMaxWidthPixels;
+            _lastFrameHeadGap = frameHeadingGapPixels;
+            _lastFrameGapH = frameGapHorizontalPixels;
+            _lastFrameGapV = frameGapVerticalPixels;
+
+            float titleH = GridTitleH, valH = GridValH, gap = FrameHeadGap, h = FrameCellH;
+            foreach (var p in _panels)
+            {
+                if (!p.isFrame || p.cellRt == null) continue;
+                p.cellRt.sizeDelta = new Vector2(_cellW, h + titleH + valH + gap);
+                var irt = p.image.rectTransform;
+                irt.anchoredPosition = new Vector2(0, -(titleH + valH + gap));
+                // Width is re-derived from the live texture's aspect in
+                // RefreshFrame; this is the placeholder size a feed with no
+                // signal keeps, which otherwise stays at the old height and
+                // makes the box look wrong for the one channel that is down.
+                irt.sizeDelta = new Vector2(Mathf.Min(_cellW, _maxFrameW), h);
+            }
+
+            if (_frameBoxRt != null) _frameBoxRt.sizeDelta = new Vector2(FrameBoxW, FrameBoxH);
+
+            // The pack signature is unchanged (the same cells are active), so
+            // force the reflow that would otherwise be skipped as a no-op.
+            _lastLayoutSig = -1;
+            RelayoutGrid();
+        }
+
         // ════════════════════════════════════════════════════════════════
         //  SENSOR GRID (waveforms + video + trial bounds overlay)
         // ════════════════════════════════════════════════════════════════
@@ -367,14 +437,14 @@ namespace Delphi
         private int _cellW = 210, _cellH = 54;
 
         // Frame cells are taller than scalar cells: a waveform reads fine in a
-        // 54 px strip, a camera feed does not. The video height is set here
-        // rather than from _cellH so the two can diverge without disturbing
-        // the scalar grid's row maths.
-        private const int FrameCellH = 132;
-        // How wide a single feed may get before it would crowd its neighbour.
-        // Generous enough for a 2:1 panorama at full height; an 8:3 eye pair
-        // hits it and scales down proportionally.
-        private float _maxFrameW => _cellW * 1.6f;
+        // 54 px strip, a camera feed does not. The video height is authored on
+        // the component rather than taken from _cellH so the two can diverge
+        // without disturbing the scalar grid's row maths.
+        private float FrameCellH => Mathf.Max(24f, frameHeightPixels);
+        private float _maxFrameW => Mathf.Max(FrameCellH * 0.25f, frameMaxWidthPixels);
+        private float FrameHeadGap => Mathf.Max(0f, frameHeadingGapPixels);
+        private float FrameGapH => Mathf.Max(0f, frameGapHorizontalPixels);
+        private float FrameGapV => Mathf.Max(0f, frameGapVerticalPixels);
 
         // Grid layout — shared by BuildSensorGrid and RelayoutGrid so the live
         // reflow lands cells in exactly the same slots the initial build uses.
@@ -385,7 +455,7 @@ namespace Delphi
         /// <summary>Frame rows are taller than scalar rows, so the frame box
         /// and its packing must size off this rather than GridRowH — otherwise
         /// the box is drawn for short rows and the feeds overflow it.</summary>
-        private float FrameRowH => FrameCellH + GridTitleH + GridValH;
+        private float FrameRowH => FrameCellH + GridTitleH + GridValH + FrameHeadGap;
         // Bit i = panel i is active. Recomputed each redraw; the grid only
         // reflows when this changes, so a steady set costs one long compare.
         private long _lastLayoutSig = -1;
@@ -449,9 +519,13 @@ namespace Delphi
                 if (p.cell.activeSelf != active) p.cell.SetActive(active);
                 if (!active) continue;
                 int col = idx % GridCols, row = idx / GridCols;
-                float rowPitch = (isFrame ? FrameRowH : GridRowH) + GridRowGap;
+                // Frame cells carry their own gaps so the feeds can be spread
+                // out without loosening the scalar grid, which is dense on
+                // purpose — twenty waveforms have to fit on one screen.
+                float rowPitch = isFrame ? FrameRowH + FrameGapV : GridRowH + GridRowGap;
+                float colPitch = _cellW + (isFrame ? FrameGapH : GridColGap);
                 p.cellRt.anchoredPosition = new Vector2(
-                    SectionContentX + col * (_cellW + GridColGap),
+                    SectionContentX + col * colPitch,
                     SectionContentY - row * rowPitch);
                 idx++;
             }
@@ -1361,6 +1435,16 @@ namespace Delphi
         // Cells pack starting just below each box's own header (see Card()).
         private const float SectionContentX = 16f, SectionContentY = -(CardHeaderH + 8f);
 
+        // The feed box is sized from the SAME expressions the cells pack with,
+        // so widening the gaps grows the box instead of pushing feeds out
+        // through its right edge.
+        private RectTransform _frameBoxRt;
+        private static int FrameRowCount =>
+            Mathf.Max(1, Mathf.CeilToInt(DelphiManager.AllFrameChannels.Length / (float)GridCols));
+        private float FrameBoxW => GridCols * (_cellW + FrameGapH) - FrameGapH + 32f;
+        private float FrameBoxH =>
+            CardHeaderH + FrameRowCount * FrameRowH + (FrameRowCount - 1) * FrameGapV + 16f;
+
         /// <summary>Two clearly separate, individually labelled boxes — one
         /// for scalar (physiological/behavioral) channels, one for camera
         /// feeds — instead of one undifferentiated mixed grid, so it's
@@ -1371,15 +1455,14 @@ namespace Delphi
             var scalar = DelphiManager.AllChannels; var frame = DelphiManager.AllFrameChannels;
 
             int scalarRows = Mathf.Max(1, Mathf.CeilToInt(scalar.Length / (float)GridCols));
-            int frameRows = Mathf.Max(1, Mathf.CeilToInt(frame.Length / (float)GridCols));
             float boxW = GridCols * (_cellW + GridColGap) - GridColGap + 32f;
             float scalarBoxH = CardHeaderH + scalarRows * GridRowH + (scalarRows - 1) * GridRowGap + 16f;
-            float frameBoxH = CardHeaderH + frameRows * FrameRowH + (frameRows - 1) * GridRowGap + 16f;
 
             var scalarBox = Card(root, "Scalar Sensors — physiological & behavioral signals",
                 new Vector2(GridX0, GridY0), new Vector2(boxW, scalarBoxH));
             var frameBox = Card(root, "Frame Sensors — camera / video feeds",
-                new Vector2(GridX0, GridY0 - scalarBoxH - 16f), new Vector2(boxW, frameBoxH));
+                new Vector2(GridX0, GridY0 - scalarBoxH - 16f), new Vector2(FrameBoxW, FrameBoxH));
+            _frameBoxRt = (RectTransform)frameBox;
 
             for (int i = 0; i < scalar.Length; i++)
                 _panels.Add(BuildSensorCell(scalarBox, isFrame: false, channel: scalar[i], frameChannel: default));
@@ -1396,7 +1479,8 @@ namespace Delphi
             // Frame rows are taller than scalar rows — see FrameCellH.
             float titleH = GridTitleH, valH = GridValH;
             float contentH = isFrame ? FrameCellH : _cellH;
-            float rowH = contentH + titleH + valH;
+            float headGap = isFrame ? FrameHeadGap : 0f;
+            float rowH = contentH + titleH + valH + headGap;
             string label = isFrame ? DelphiManager.FrameMeta(frameChannel).label : DelphiManager.Meta(channel).label;
 
             // Position is provisional — RelayoutGrid() packs the ACTIVE cells
@@ -1411,7 +1495,7 @@ namespace Delphi
             var raw = imgGO.GetComponent<RawImage>(); raw.color = Color.white;
             var irt = imgGO.GetComponent<RectTransform>();
             irt.anchorMin = irt.anchorMax = new Vector2(0, 1); irt.pivot = new Vector2(0, 1);
-            irt.anchoredPosition = new Vector2(0, -(titleH + valH)); irt.sizeDelta = new Vector2(_cellW, contentH);
+            irt.anchoredPosition = new Vector2(0, -(titleH + valH + headGap)); irt.sizeDelta = new Vector2(_cellW, contentH);
 
             var panel = new Panel { isFrame = isFrame, cell = cont, cellRt = crt, title = t, value = v, image = raw };
             if (isFrame)
