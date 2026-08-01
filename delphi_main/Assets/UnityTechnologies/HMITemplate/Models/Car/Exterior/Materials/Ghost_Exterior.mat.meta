@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 0451ce4807d45e44cb227b787246a772
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Models/Car/Exterior/Materials/Ghost_Exterior.mat
+  uploadId: 949372

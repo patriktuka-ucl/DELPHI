@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 45750624bff30694781c42777acf8c11
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Prefabs/UI/IVI/CarScreen/CarDotConnector.prefab
+  uploadId: 949372

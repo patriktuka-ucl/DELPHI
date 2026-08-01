@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 65945981aa4044d468717582ea913aa8
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Materials/Cluster/BatteryFalloff2.mat
+  uploadId: 949372

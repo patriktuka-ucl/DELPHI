@@ -3,27 +3,7 @@
 --- !u!78 &1
 TagManager:
   serializedVersion: 3
-  tags:
-  - QTQuestionnaireManager
-  - QTQuestionPage
-  - QTSelectionHighlight
-  - QTSlider
-  - QTMultipleChoice
-  - QTOptionOther
-  - QTButton
-  - QTCheckboxes
-  - QTCheckboxesGrid
-  - QTGridOption
-  - QTDropdown
-  - QTGridRowHeader
-  - QTImage
-  - QTLinearScale
-  - QTMultipleChoiceGrid
-  - QTManager
-  - QTText
-  - QTTextInput
-  - QTVideo
-  - BOforUnityManager
+  tags: []
   layers:
   - Default
   - TransparentFX
@@ -31,14 +11,14 @@ TagManager:
   - 
   - Water
   - UI
-  - 
-  - 
-  - OverviewOnly
-  - DashboardUI
-  - 
-  - 
-  - 
-  - 
+  - Cluster
+  - IVI
+  - HVAC
+  - Map
+  - ADAS
+  - Invisible
+  - IVI_Car
+  - IVI_Map
   - 
   - 
   - 
@@ -61,6 +41,15 @@ TagManager:
   - name: Default
     uniqueID: 0
     locked: 0
+  - name: Background
+    uniqueID: 4158710485
+    locked: 0
+  - name: Middle
+    uniqueID: 572934887
+    locked: 0
+  - name: Foreground
+    uniqueID: 2956894377
+    locked: 0
   m_RenderingLayers:
   - Default
   - Light Layer 1
@@ -70,4 +59,3 @@ TagManager:
   - Light Layer 5
   - Light Layer 6
   - Light Layer 7
-  m_MigratedRenderPipelines: []

@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 2fc6a29b9eda0374683ee075f1e9cfbf
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Timelines/Cluster/PRNDInvisible.playable
+  uploadId: 949372

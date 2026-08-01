@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 06829c146f669494f9479e89d478731f
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Prefabs/Info_BatteryLevel.prefab
+  uploadId: 949372

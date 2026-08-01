@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: f7a9a2d8ecca8544d96444155128b5f5
+ShaderImporter:
+  externalObjects: {}
+  defaultTextures: []
+  nonModifiableTextures: []
+  preprocessorOverride: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Shaders/AdditiveSprite.shader
+  uploadId: 949372

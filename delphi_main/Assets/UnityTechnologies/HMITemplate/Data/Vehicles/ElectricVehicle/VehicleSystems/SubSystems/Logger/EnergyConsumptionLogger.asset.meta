@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 45efeb2edcf0b414b9340fad104449e8
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Data/Vehicles/ElectricVehicle/VehicleSystems/SubSystems/Logger/EnergyConsumptionLogger.asset
+  uploadId: 949372

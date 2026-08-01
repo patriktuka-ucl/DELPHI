@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: 718cea207d7d2400aaa413ac3b09a6d5
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Scripts/HMI/UI/Skins/UISkinCycler.cs
+  uploadId: 949372

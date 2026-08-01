@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 8dae9477e32323a49a5806affa16b504
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Materials/IVI/CarFakeShadow.mat
+  uploadId: 949372

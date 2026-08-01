@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: c12b9dc1fb82d55428042ec89c4b1f09
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Nightmode/Cluster/Right/Mediaplayer/MP_BandText.asset
+  uploadId: 949372

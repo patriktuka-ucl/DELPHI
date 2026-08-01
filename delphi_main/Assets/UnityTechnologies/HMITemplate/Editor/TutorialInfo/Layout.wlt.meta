@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: eabc9546105bf4accac1fd62a63e88e6
+DefaultImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Editor/TutorialInfo/Layout.wlt
+  uploadId: 949372

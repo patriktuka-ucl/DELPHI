@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
@@ -190,6 +191,17 @@ namespace Delphi
         // channel can't silently under-size this and throw/skip in Update().
         private readonly double[] _frameNext = new double[AllFrameChannels.Length];
 
+        // Tracks each frame channel's on/off state as of the LAST Update, so a
+        // toggle flip can be edge-detected and turned into sensor.enabled =
+        // on/off (see the comment on that line in Update() for why this
+        // exists at all). Set to true for every slot in OnEnable — every
+        // FrameSensor component starts enabled via Unity's own lifecycle
+        // regardless of what the inspector checkbox says, so seeding it that
+        // way makes an off-from-the-start channel register as a flip on
+        // frame 0 and get disabled immediately, while an on-from-the-start
+        // channel matches and is correctly left alone.
+        private readonly bool[] _frameOnPrev = new bool[AllFrameChannels.Length];
+
         private static readonly Channel[] ContactChannels =
             { Channel.HeartRate, Channel.RMSSD, Channel.RespRate,
               Channel.GSR, Channel.GsrTonic, Channel.GsrPhasic };
@@ -326,6 +338,10 @@ namespace Delphi
             };
             _core = new DelphiCore(_coreGroups, AllChannels, Slot, IsOn);
             _core.Start();
+
+            // See _frameOnPrev's declaration for why this is seeded to true
+            // rather than left at the array's default false.
+            for (int i = 0; i < _frameOnPrev.Length; i++) _frameOnPrev[i] = true;
         }
 
         private void OnDisable()
@@ -345,8 +361,28 @@ namespace Delphi
             for (int i = 0; i < AllFrameChannels.Length; i++)
             {
                 var fc = AllFrameChannels[i];
-                if (!IsOn(fc)) continue;
+                bool on = IsOn(fc);
                 var s = FrameSlot(fc);
+
+                // The "…On" checkboxes used to only gate whether ReadFrame()
+                // got CALLED below — they never touched the sensor component
+                // itself. For WebcamSensor that left the physical camera
+                // capturing continuously (WebCamTexture.Play(), started in
+                // OnEnable) for the rest of the session no matter what the
+                // checkbox said, because only the component's own OnDisable
+                // stops it and nothing was calling that. Toggling the
+                // component's enabled state here — instead of leaving this a
+                // pure "skip ReadFrame" gate — routes through Unity's normal
+                // OnEnable/OnDisable, so turning a feed off actually stops
+                // whatever hardware or render-to-texture work it was doing,
+                // for every FrameSensor, not just this one.
+                if (s != null && on != _frameOnPrev[i])
+                {
+                    s.enabled = on;
+                    _frameOnPrev[i] = on;
+                }
+
+                if (!on) continue;
                 if (s == null) continue;
                 if (DelphiClock.Now < _frameNext[i]) continue;
                 _frameNext[i] = DelphiClock.Now + 1.0 / FrameRate(fc);
@@ -386,7 +422,12 @@ namespace Delphi
         // fit normally. This exists so flipping Debug Constant Feed on gets
         // that same good behaviour by default, without hand-wiring
         // MockSensor_Scalar into every slot first.
-        private readonly Dictionary<Channel, MockSensor_Scalar> _debugSensors = new();
+        // Concurrent, not plain Dictionary: the sampling thread reads this via
+        // Slot()/GetValue() while the main thread can be mid-insert in
+        // EnsureDebugSensors() — a plain Dictionary is not safe for
+        // concurrent read-during-write and can throw or hand back a corrupt
+        // read in that window.
+        private readonly ConcurrentDictionary<Channel, MockSensor_Scalar> _debugSensors = new();
 
         private void EnsureDebugSensors()
         {
@@ -430,8 +471,12 @@ namespace Delphi
             if (on)
             {
                 SnapshotAndClearToggles();
-                debugConstantFeed = true;
+                // Populate _debugSensors BEFORE the sampling thread can see
+                // debugConstantFeed = true — Slot()/GetValue() start reading
+                // this dictionary the instant the flag flips, so the flag
+                // must flip only once every entry is already in place.
                 EnsureDebugSensors();
+                debugConstantFeed = true;
             }
             else
             {

@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 1d24438a3eb065940be636886f1f1bb7
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Models/Car/Exterior/Materials/GlossyPlastic.mat
+  uploadId: 949372

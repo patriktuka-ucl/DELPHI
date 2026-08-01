@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 5f59d588113e9a44c95003511ad9456c
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Daymode/IVI/IVI_ButtonTextColorActive.asset
+  uploadId: 949372

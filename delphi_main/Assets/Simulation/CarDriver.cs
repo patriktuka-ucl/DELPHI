@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -111,6 +112,75 @@ namespace Delphi.Simulation
         public float CornerSlowdownKmh => Mathf.Lerp(cornerSlowdownMaxKmh, cornerSlowdownMinKmh, corneringSpeed); // inverted
     }
 
+    /// <summary>One entry per driving-style axis: key, display labels, on/off
+    /// + get/set, and the physical value each end of the 0..1 style axis maps
+    /// to (already oriented — PhysicalAtZero/PhysicalAtOne encode any
+    /// inversion internally, e.g. follow distance and cornering speed are
+    /// both "gentle = larger physical number").</summary>
+    public sealed class DrivingParameterInfo
+    {
+        public readonly string Key;
+        public readonly string Label;       // full name, e.g. "Follow distance"
+        public readonly string ShortLabel;  // abbreviated, e.g. "Follow dist"
+        public readonly string Unit;
+        public readonly Func<DrivingParameters, float> Get;
+        public readonly Action<DrivingParameters, float> Set;
+        public readonly Func<DrivingParameters, bool> IsOn;
+        public readonly Func<DrivingParameters, float> PhysicalAtZero;
+        public readonly Func<DrivingParameters, float> PhysicalAtOne;
+
+        public DrivingParameterInfo(string key, string label, string shortLabel, string unit,
+            Func<DrivingParameters, float> get, Action<DrivingParameters, float> set,
+            Func<DrivingParameters, bool> isOn,
+            Func<DrivingParameters, float> physicalAtZero, Func<DrivingParameters, float> physicalAtOne)
+        {
+            Key = key; Label = label; ShortLabel = shortLabel; Unit = unit;
+            Get = get; Set = set; IsOn = isOn;
+            PhysicalAtZero = physicalAtZero; PhysicalAtOne = physicalAtOne;
+        }
+    }
+
+    /// <summary>Single source of truth for the driving-parameter axis list —
+    /// every consumer (trial bookkeeping, CSV/JSON export, the researcher
+    /// dashboard, the FreePlay panel) enumerates this instead of each keeping
+    /// its own copy of the four keys/labels.</summary>
+    public static class DrivingParameterRegistry
+    {
+        public static readonly DrivingParameterInfo[] All =
+        {
+            new DrivingParameterInfo("accelerationJerk", "Acceleration", "Acceleration", "m/s^2",
+                p => p.accelerationJerk, (p, v) => p.accelerationJerk = v, p => p.accelerationJerkOn,
+                p => p.accelJerkMin, p => p.accelJerkMax),
+            new DrivingParameterInfo("brakingJerk", "Braking", "Braking", "m/s^2",
+                p => p.brakingJerk, (p, v) => p.brakingJerk = v, p => p.brakingJerkOn,
+                p => p.brakeJerkMin, p => p.brakeJerkMax),
+            new DrivingParameterInfo("followDistance", "Follow distance", "Follow dist",
+                "s headway (inverted: 0=far/gentle, 1=close/assertive)",
+                p => p.followDistance, (p, v) => p.followDistance = v, p => p.followDistanceOn,
+                p => p.followMax, p => p.followMin),
+            new DrivingParameterInfo("corneringSpeed", "Cornering speed", "Corner spd",
+                "km/h cut in the tightest realistic turn (inverted: 0=cuts a lot/gentle, 1=barely cuts/assertive)",
+                p => p.corneringSpeed, (p, v) => p.corneringSpeed = v, p => p.corneringSpeedOn,
+                p => p.cornerSlowdownMaxKmh, p => p.cornerSlowdownMinKmh),
+        };
+
+        public static readonly string[] Keys = BuildKeys();
+
+        private static string[] BuildKeys()
+        {
+            var keys = new string[All.Length];
+            for (int i = 0; i < All.Length; i++) keys[i] = All[i].Key;
+            return keys;
+        }
+
+        public static DrivingParameterInfo ByKey(string key)
+        {
+            foreach (var info in All)
+                if (info.Key == key) return info;
+            return null;
+        }
+    }
+
     /// <summary>
     /// The ego AV. Drives the Track in route space (see RouteVehicle): direct
     /// speed control at each style's own CONSTANT accel/decel magnitude,
@@ -162,6 +232,8 @@ namespace Delphi.Simulation
         private bool _headingToPark;
         private bool _parkingInPlace; // braking to a halt where it stands, no marker to aim at
         private TrackEvent _targetPark; // the specific marker this park request is aimed at
+        private bool _headingToPullover;
+        private float _pulloverTargetS; // computed on demand by RequestPullover, not hand-authored
         private float _settleSpeed;     // where ComputeTargetSpeed says this manoeuvre ENDS
 
         public float CurrentSpeedKmh => Speed * 3.6f;
@@ -217,6 +289,9 @@ namespace Delphi.Simulation
         /// <summary>True from RequestPark() until the car actually arrives at
         /// the Park marker and IsParked becomes true.</summary>
         public bool IsHeadingToPark => _headingToPark;
+        /// <summary>True from RequestPullover() until the car actually comes
+        /// to a halt at the computed pullover point.</summary>
+        public bool IsHeadingToPullover => _headingToPullover;
 
         private void Start()
         {
@@ -231,6 +306,7 @@ namespace Delphi.Simulation
             _finished = false;
             _isParked = startParked;
             _headingToPark = false;
+            _headingToPullover = false;
             LogTightestCurve();
         }
 
@@ -252,6 +328,7 @@ namespace Delphi.Simulation
             if (!_isParked) return;
             _isParked = false;
             _headingToPark = false;
+            _headingToPullover = false;
             if (logStateChanges) Debug.Log("[CarDriver] Resuming driving.");
         }
 
@@ -288,6 +365,43 @@ namespace Delphi.Simulation
             if (logStateChanges) Debug.Log($"[CarDriver] Heading to park at s={_targetPark.S:F0}m.");
         }
 
+        /// <summary>Real-time pullover: finds the nearest point ahead that's
+        /// safe to stop at (clear of any corner and of every StopAndGo/Park
+        /// marker's own meaning — see Track.TryFindSafeStoppingPoint) and
+        /// brakes smoothly onto it, using the same approach-curve math as a
+        /// red light or a Park marker.
+        ///
+        /// Unlike RequestPark, the target is COMPUTED, not hand-authored —
+        /// this is for stopping wherever the car happens to be when a drive
+        /// ends, rather than requiring the route to be pre-timed to land on a
+        /// fixed marker. This track has no lane/shoulder geometry, so
+        /// "pulling over" means a smooth in-lane stop, never a lateral
+        /// curb-side offset — it can never mount a curb because the car
+        /// never leaves the line it already drives on.
+        ///
+        /// No-op if already parked/heading somewhere. Falls back to braking
+        /// to a halt in place (same fallback RequestPark uses) if nothing
+        /// safe is found within searchAheadMeters.</summary>
+        public void RequestPullover(float maxAbsCurvature = 0.02f, float searchAheadMeters = 400f)
+        {
+            _finished = false;
+            if (_isParked || _headingToPark || _headingToPullover || _parkingInPlace) return;
+
+            if (track.TryFindSafeStoppingPoint(S, maxAbsCurvature, searchAheadMeters, out float s))
+            {
+                _pulloverTargetS = s;
+                _headingToPullover = true;
+                if (logStateChanges) Debug.Log($"[CarDriver] Pulling over at s={s:F0}m.");
+            }
+            else
+            {
+                Debug.LogWarning("[CarDriver] RequestPullover(): no safe stopping point found within " +
+                                 $"{searchAheadMeters:F0}m ahead of s={S:F0}m — braking to a halt in " +
+                                  "place instead.");
+                _parkingInPlace = true;
+            }
+        }
+
         /// <summary>Instantly teleport back to the track's start (its first
         /// Park marker, or s=0 if none) and mark it parked there — no
         /// physical drive, no elapsed time. This is what SessionController
@@ -304,6 +418,7 @@ namespace Delphi.Simulation
             _servedLights.Clear();
             _finished = false;
             _headingToPark = false;
+            _headingToPullover = false;
             _parkingInPlace = false;
             _targetPark = null;
             _isParked = true;
@@ -318,6 +433,7 @@ namespace Delphi.Simulation
         {
             _waitingAtRedLight = false;
             _headingToPark = false;
+            _headingToPullover = false;
             _isParked = true;
             HoldStopped();
             if (logStateChanges) Debug.Log($"[CarDriver] Emergency halt at s={S:F0}m.");
@@ -333,6 +449,7 @@ namespace Delphi.Simulation
         {
             _waitingAtRedLight = false;
             _headingToPark = false;
+            _headingToPullover = false;
             _isParked = true;
             HoldStopped();
             if (logStateChanges) Debug.Log($"[CarDriver] Frozen in place at s={S:F0}m.");
@@ -465,6 +582,21 @@ namespace Delphi.Simulation
                 return;
             }
 
+            // ── Arriving at the computed pullover point ──────────────
+            // Same exact-line landing again, aimed at RequestPullover's
+            // on-demand target instead of a hand-authored marker.
+            if (_headingToPullover && newS >= _pulloverTargetS)
+            {
+                S = _pulloverTargetS;
+                _isParked = true;
+                _headingToPullover = false;
+                HoldStopped();
+                PublishStationary(SpeedLimiter.Parked);
+                if (logStateChanges) Debug.Log($"[CarDriver] Pulled over (s={_pulloverTargetS:F0}m).");
+                PlaceOnRoute(dt);
+                return;
+            }
+
             S = newS;
 
             // ── End of the track ─────────────────────────────────────
@@ -478,6 +610,7 @@ namespace Delphi.Simulation
                 S = track.TotalLength;
                 _finished = true;
                 _headingToPark = false;
+                _headingToPullover = false;
                 _parkingInPlace = false;
                 _targetPark = null;
                 _isParked = true;
@@ -596,6 +729,20 @@ namespace Delphi.Simulation
             if (_headingToPark && _targetPark != null)
             {
                 float distanceRemaining = Mathf.Max(0f, _targetPark.S - (S + Speed * dt));
+                float approachLimit = Mathf.Sqrt(2f * parameters.BrakeJerk * distanceRemaining);
+                if (approachLimit < target)
+                {
+                    target = approachLimit;
+                    Limiter = SpeedLimiter.Parked;
+                    _settleSpeed = 0f;
+                }
+            }
+
+            // Same anticipatory braking curve again, aimed at the on-demand
+            // pullover point — only active once RequestPullover() has found one.
+            if (_headingToPullover)
+            {
+                float distanceRemaining = Mathf.Max(0f, _pulloverTargetS - (S + Speed * dt));
                 float approachLimit = Mathf.Sqrt(2f * parameters.BrakeJerk * distanceRemaining);
                 if (approachLimit < target)
                 {

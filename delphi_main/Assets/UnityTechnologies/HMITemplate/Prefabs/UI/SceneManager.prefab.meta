@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: ea20f2a4b0d535f44b92f169f8c192aa
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Prefabs/UI/SceneManager.prefab
+  uploadId: 949372

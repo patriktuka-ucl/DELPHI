@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 5353b6079660e8747a8042412aa8bcb1
+DefaultImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Scenes/Cluster.unity
+  uploadId: 949372

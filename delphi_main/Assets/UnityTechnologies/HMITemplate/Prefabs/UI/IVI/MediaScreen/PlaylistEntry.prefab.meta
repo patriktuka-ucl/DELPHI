@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: d03fd80537cdf61479653b3069a757ab
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Prefabs/UI/IVI/MediaScreen/PlaylistEntry.prefab
+  uploadId: 949372

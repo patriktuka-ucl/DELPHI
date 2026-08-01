@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 6f9a4ceb8d694e84a813dc25937b2bea
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Timelines/Cluster/Infoscreens/MediaPlayer/FadeInMediaplayer.playable
+  uploadId: 949372

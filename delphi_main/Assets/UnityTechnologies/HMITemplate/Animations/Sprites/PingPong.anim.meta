@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: e5fb1687a162b06449d577650627a0eb
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 7400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Animations/Sprites/PingPong.anim
+  uploadId: 949372

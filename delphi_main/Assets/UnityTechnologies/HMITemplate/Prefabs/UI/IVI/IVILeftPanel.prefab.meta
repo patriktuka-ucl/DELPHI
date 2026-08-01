@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 77a9caa306ef4eb47ba3617c725341aa
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Prefabs/UI/IVI/IVILeftPanel.prefab
+  uploadId: 949372

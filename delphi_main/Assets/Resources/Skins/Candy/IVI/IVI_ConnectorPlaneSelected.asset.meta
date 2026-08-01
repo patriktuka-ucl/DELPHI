@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: c95953cd9356a094c8eed9cca3f5ae4b
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Candy/IVI/IVI_ConnectorPlaneSelected.asset
+  uploadId: 949372

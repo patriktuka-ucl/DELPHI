@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: a10576e307d89b041b2bde66351a03e2
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Daymode/Cluster/Right/BatteryLevel/BL_PercentageText.asset
+  uploadId: 949372

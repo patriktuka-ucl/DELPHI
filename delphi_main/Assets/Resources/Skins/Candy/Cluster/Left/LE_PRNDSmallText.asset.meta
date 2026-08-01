@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 53ded97d870308143be6f8539b0519d0
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Candy/Cluster/Left/LE_PRNDSmallText.asset
+  uploadId: 949372

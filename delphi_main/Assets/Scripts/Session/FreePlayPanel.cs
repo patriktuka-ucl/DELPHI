@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
+using Delphi.Simulation;
 
 namespace Delphi.Session
 {
@@ -179,18 +180,13 @@ namespace Delphi.Session
         /// <summary>Layout width available to controls, inside the margins.</summary>
         public const float UsableWidthPixels = PixelWidth - 56f;
 
-        private static readonly string[] ParamLabels =
-            { "Acceleration", "Braking", "Follow distance", "Cornering speed" };
-        private static readonly string[] ParamKeys =
-            { "accelerationJerk", "brakingJerk", "followDistance", "corneringSpeed" };
-
         private Font _font;
         private GameObject _panelRoot; // toggled on/off with Phase.FreePlay; this component's own GameObject stays active so Update() keeps polling
-        private readonly Text[] _values = new Text[ParamKeys.Length];
+        private readonly Text[] _values = new Text[DrivingParameterRegistry.All.Length];
 
         private bool _mountedToSeat;
         private bool _physical;   // seat-mounted VR layout in use
-        private readonly VR.VrTouchSlider[] _touchSliders = new VR.VrTouchSlider[ParamKeys.Length];
+        private readonly VR.VrTouchSlider[] _touchSliders = new VR.VrTouchSlider[DrivingParameterRegistry.All.Length];
 
         // Single-style-slider mode.
         private VR.VrTouchSlider _styleSlider;
@@ -325,10 +321,8 @@ namespace Delphi.Session
         private void EchoParameters()
         {
             var p = session.carDriver.parameters;
-            float[] v = { p.accelerationJerk, p.brakingJerk, p.followDistance,
-                          p.corneringSpeed };
 
-            for (int i = 0; i < ParamKeys.Length; i++)
+            for (int i = 0; i < DrivingParameterRegistry.All.Length; i++)
             {
                 // The slider owns its own readout, so this only has to keep
                 // it in step with the car when the participant is NOT touching
@@ -336,7 +330,7 @@ namespace Delphi.Session
                 // SetFreePlayParameter and fight the finger.
                 var ts = _touchSliders[i];
                 if (ts != null && !ts.IsEngaged)
-                    ts.SetValue(v[i], notify: false);
+                    ts.SetValue(DrivingParameterRegistry.All[i].Get(p), notify: false);
             }
         }
 
@@ -509,12 +503,13 @@ namespace Delphi.Session
             const float RowH = 132f;
             const float RowTop = -100f;
 
-            for (int i = 0; i < ParamKeys.Length; i++)
+            for (int i = 0; i < DrivingParameterRegistry.All.Length; i++)
             {
                 float y = RowTop - i * RowH;
                 int idx = i; // capture per-iteration, not the loop variable
+                var info = DrivingParameterRegistry.All[i];
 
-                Txt(parent, ParamLabels[i].ToUpperInvariant(), 19,
+                Txt(parent, info.Label.ToUpperInvariant(), 19,
                     new Color(0.74f, 0.79f, 0.88f), new Vector2(28, y), new Vector2(PixelWidth - 160, 26));
 
                 _values[i] = Txt(parent, "0.50", 22,
@@ -525,13 +520,13 @@ namespace Delphi.Session
                 // The interactive row is deliberately TALLER than the visible
                 // track. Hand tracking has centimetres of jitter, and a target
                 // only as tall as an 14 px bar would be missed constantly.
-                var row = NewRow(parent, $"Row_{ParamLabels[i]}", new Vector2(28, y - 38),
+                var row = NewRow(parent, $"Row_{info.Label}", new Vector2(28, y - 38),
                                  new Vector2(PixelWidth - 56, 88));
 
                 var slider = row.gameObject.AddComponent<VR.VrTouchSlider>();
                 slider.Build(row, _font);
                 slider.BindValueLabel(_values[i]);
-                slider.onValueChanged.AddListener(val => session?.SetFreePlayParameter(ParamKeys[idx], val));
+                slider.onValueChanged.AddListener(val => session?.SetFreePlayParameter(DrivingParameterRegistry.All[idx].Key, val));
                 _touchSliders[i] = slider;
             }
         }

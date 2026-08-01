@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 51f6b9f188182a040b0ca09c500c0780
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Materials/IVI/BigLight.mat
+  uploadId: 949372

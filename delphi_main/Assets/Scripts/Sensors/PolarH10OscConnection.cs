@@ -35,6 +35,7 @@ namespace Delphi
         [SerializeField] private int listenPort = 9500;
         [SerializeField] private string hrAddress = "/PolarH10/HR";
         [SerializeField] private string rrAddress = "/PolarH10/RR";
+        [SerializeField] private string batteryAddress = "/PolarH10/Battery";
         [Tooltip("Logs actual parse FAILURES only (malformed packet, unrecognized " +
                  "address, missing float arg) — rare-path diagnostics. Deliberately " +
                  "does NOT echo every successfully-parsed HR/RR value: at 25-200Hz " +
@@ -80,6 +81,9 @@ namespace Delphi
 
         private float _latestAccXmG, _latestAccYmG, _latestAccZmG;
         private bool _hasAcc;
+
+        private int _latestBatteryPercent;
+        private bool _hasBattery;
 
         // Touched only from the listener thread.
         private readonly List<float> _rrHistoryMs = new List<float>();
@@ -346,6 +350,10 @@ namespace Delphi
             {
                 lock (_lock) { _latestAccZmG = firstFloat; _hasAcc = true; }
             }
+            else if (address == batteryAddress)
+            {
+                lock (_lock) { _latestBatteryPercent = Mathf.RoundToInt(firstFloat); _hasBattery = true; }
+            }
             else if (logParseErrors)
             {
                 Debug.LogWarning($"[PolarH10OscConnection] Unrecognized OSC address '{address}' (expected '{hrAddress}' or '{rrAddress}').");
@@ -407,6 +415,10 @@ namespace Delphi
         public float GetAccXmG() { lock (_lock) { return _hasAcc ? _latestAccXmG : float.NaN; } }
         public float GetAccYmG() { lock (_lock) { return _hasAcc ? _latestAccYmG : float.NaN; } }
         public float GetAccZmG() { lock (_lock) { return _hasAcc ? _latestAccZmG : float.NaN; } }
+
+        /// <summary>Battery percentage (0-100), polled roughly once a minute
+        /// on the Python side — NaN until the first reading arrives.</summary>
+        public float GetBatteryPercent() { lock (_lock) { return _hasBattery ? _latestBatteryPercent : float.NaN; } }
 
         /// <summary>True once the strap has actually delivered HR or ACC data
         /// — the socket binding alone (Awake succeeding) only means we're

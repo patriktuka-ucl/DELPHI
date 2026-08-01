@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 9b34004c2fdb444188fa8845cd44aca6
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Models/Car/Exterior/Materials/Tires.mat
+  uploadId: 949372

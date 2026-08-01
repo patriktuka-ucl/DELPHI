@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 378c5c8097a90634d85db3faa3d2d964
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Timelines/Cluster/PRNDFadeInTimeline.playable
+  uploadId: 949372

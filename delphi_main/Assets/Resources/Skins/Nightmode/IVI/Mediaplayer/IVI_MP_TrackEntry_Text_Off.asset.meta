@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 783de41b5499bdb4c9221324c054d6f4
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Nightmode/IVI/Mediaplayer/IVI_MP_TrackEntry_Text_Off.asset
+  uploadId: 949372

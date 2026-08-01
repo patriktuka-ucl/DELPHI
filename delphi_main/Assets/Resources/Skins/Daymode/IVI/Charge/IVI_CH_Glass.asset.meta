@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: f29fc00d7ef900847b4db19a0cab0d7b
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Daymode/IVI/Charge/IVI_CH_Glass.asset
+  uploadId: 949372

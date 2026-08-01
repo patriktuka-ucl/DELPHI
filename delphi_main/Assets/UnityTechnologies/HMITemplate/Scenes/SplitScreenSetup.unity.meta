@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 902a32fb2598bd6419fdb89502892461
+DefaultImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Scenes/SplitScreenSetup.unity
+  uploadId: 949372

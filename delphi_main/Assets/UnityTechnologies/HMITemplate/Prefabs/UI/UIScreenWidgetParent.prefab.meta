@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 611264dada19a7544bd15375e3667329
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Prefabs/UI/UIScreenWidgetParent.prefab
+  uploadId: 949372

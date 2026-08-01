@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 7a9fcb4e6822a70479452f491045474c
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Prefabs/UI/IVI/MediaScreen/Playhead_UI.prefab
+  uploadId: 949372

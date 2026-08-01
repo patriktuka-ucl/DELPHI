@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 7990e5ed5668caa4ea579df94c6d0aa3
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Nightmode/HVAC/HVAC Seat Arrow.asset
+  uploadId: 949372

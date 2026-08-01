@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 79d16860b4cdaf84ea289cc65616135d
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Prefabs/Services/HVACService.prefab
+  uploadId: 949372

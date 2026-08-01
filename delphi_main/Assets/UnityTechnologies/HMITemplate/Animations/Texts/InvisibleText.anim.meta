@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 2f2f81c1d293f8b44bd45f6932073cbe
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 7400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Animations/Texts/InvisibleText.anim
+  uploadId: 949372

@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: a07ac2174971b834b8c2a7e6cd809d66
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 7400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Animations/Meshes/Fade Out Material.anim
+  uploadId: 949372

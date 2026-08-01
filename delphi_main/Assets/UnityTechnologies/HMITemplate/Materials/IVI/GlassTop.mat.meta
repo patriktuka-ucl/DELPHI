@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 5b2bd48c375c1de49a788917a598b808
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Materials/IVI/GlassTop.mat
+  uploadId: 949372

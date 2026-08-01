@@ -474,6 +474,39 @@ namespace Delphi.Simulation
             return false;
         }
 
+        // How far a computed pullover point must sit from any StopAndGo/Park
+        // marker — so it can never land on (or just short of) a line that
+        // already means something else.
+        private const float PulloverMarkerClearanceMeters = 15f;
+
+        /// <summary>Scans forward from `fromS` for the nearest point that's
+        /// safe to stop a vehicle at on the existing driving line: curvature
+        /// under maxAbsCurvature (not mid-corner) and clear of every
+        /// StopAndGo/Park marker. Unlike Park, this point is computed on
+        /// demand for a real-time pullover, not hand-authored — see
+        /// CarDriver.RequestPullover.</summary>
+        public bool TryFindSafeStoppingPoint(float fromS, float maxAbsCurvature, float searchAheadMeters, out float resultS)
+        {
+            const float scanStep = 2f;
+            float limit = Mathf.Min(TotalLength, fromS + Mathf.Max(scanStep, searchAheadMeters));
+
+            for (float s = Mathf.Max(0f, fromS); s <= limit; s += scanStep)
+            {
+                if (CurvatureAt(s) > maxAbsCurvature) continue;
+
+                bool tooClose = false;
+                foreach (var st in _stops) if (Mathf.Abs(st.S - s) < PulloverMarkerClearanceMeters) { tooClose = true; break; }
+                if (!tooClose)
+                    foreach (var pk in _parks) if (Mathf.Abs(pk.S - s) < PulloverMarkerClearanceMeters) { tooClose = true; break; }
+                if (tooClose) continue;
+
+                resultS = s;
+                return true;
+            }
+            resultS = 0f;
+            return false;
+        }
+
         // ── Debug visualisation (Scene view only, before pressing Play) ──
         private void OnDrawGizmos()
         {

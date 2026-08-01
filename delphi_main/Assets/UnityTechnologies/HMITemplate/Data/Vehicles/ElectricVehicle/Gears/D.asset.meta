@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: c3ba812f5b99a464bb87b4a3af383381
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Data/Vehicles/ElectricVehicle/Gears/D.asset
+  uploadId: 949372

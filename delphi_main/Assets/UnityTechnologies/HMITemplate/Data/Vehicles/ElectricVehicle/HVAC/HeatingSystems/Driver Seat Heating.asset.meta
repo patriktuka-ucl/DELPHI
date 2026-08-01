@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 4196e6d57f186e74f954b95c23565bc2
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Data/Vehicles/ElectricVehicle/HVAC/HeatingSystems/Driver
+    Seat Heating.asset
+  uploadId: 949372

@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: f5412c52a6ee58b4da0d9ea219c28c43
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Daymode/IVI/Mediaplayer/IVI_MP_Scrubber_Fill.asset
+  uploadId: 949372

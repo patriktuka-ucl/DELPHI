@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 24ccb5653b1185d40b1a5aaf9fdbb1af
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Timelines/Cluster/Infoscreens/BatteryUsage/FadeInBatteryUsage.playable
+  uploadId: 949372

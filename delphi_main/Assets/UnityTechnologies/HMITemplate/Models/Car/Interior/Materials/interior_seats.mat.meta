@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 4b4abe30a0c31cf4e98d5ea804c4b3ae
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Models/Car/Interior/Materials/interior_seats.mat
+  uploadId: 949372

@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 35f20342a2cc2e14399cafa4c30dd12b
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Prefabs/UI/IVI/IVIToggleGroupPortraitMode.prefab
+  uploadId: 949372

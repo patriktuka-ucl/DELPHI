@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 47ed3efe21a774e26a6c5eb61c015499
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Models/Car/Simple Car Variant (ADAS).prefab
+  uploadId: 949372

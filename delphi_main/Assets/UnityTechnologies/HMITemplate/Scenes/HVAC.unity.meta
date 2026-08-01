@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: d409ab10935d28f468e76d5086e79f65
+DefaultImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Scenes/HVAC.unity
+  uploadId: 949372

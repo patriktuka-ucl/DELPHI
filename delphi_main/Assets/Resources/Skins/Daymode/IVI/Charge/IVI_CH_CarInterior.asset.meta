@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 1f34ac31aa6c75e4aa6dd6e0ad742e4e
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Daymode/IVI/Charge/IVI_CH_CarInterior.asset
+  uploadId: 949372

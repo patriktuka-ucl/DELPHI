@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: 005d143f89ad8324a9b273d9319a3374
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Editor/SpriteGroupColorAlphaEditor.cs
+  uploadId: 949372

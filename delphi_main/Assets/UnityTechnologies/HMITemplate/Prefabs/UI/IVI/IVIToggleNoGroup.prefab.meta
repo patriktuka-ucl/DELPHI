@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 006cbde1268e64b438965a263c99ae89
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Prefabs/UI/IVI/IVIToggleNoGroup.prefab
+  uploadId: 949372

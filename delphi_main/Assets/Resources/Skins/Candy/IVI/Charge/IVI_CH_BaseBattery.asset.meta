@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 147b385fc268c984197a40ad5e134ca3
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Candy/IVI/Charge/IVI_CH_BaseBattery.asset
+  uploadId: 949372

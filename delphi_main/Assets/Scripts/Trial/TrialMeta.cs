@@ -19,21 +19,33 @@ namespace Delphi.Trial
         public float totalDurationSeconds;
 
         /// <summary>The baseline is measured DURING the meditation track, not
-        /// in a phase of its own: a window this long, ending
-        /// baselineWindowEndOffsetSeconds before the track finishes.</summary>
-        public float baselineWindowSeconds;
-        public float baselineWindowEndOffsetSeconds;
+        /// in a phase of its own — three authored sections of one audio file:
+        /// acclimatisation (just listening), measurement (this condition's
+        /// baseline window), then fadeout (volume ramps to 0).</summary>
+        public float meditationAcclimatisationSeconds;
+        public float meditationMeasurementSeconds;
+        public float meditationFadeoutSeconds;
         /// <summary>How many channels actually delivered samples in that
         /// window. Fewer than the sensors attached means one dropped out —
         /// check before trusting the objectives.</summary>
         public int baselineChannelCount;
 
+        /// <summary>washoutSeconds + measureSeconds — derived on the
+        /// SessionController side, recorded here as a snapshot.</summary>
         public float windowSeconds;
+        /// <summary>transitionSeconds + idleSeconds — derived on the
+        /// SessionController side, recorded here as a snapshot.</summary>
         public float washoutSeconds;
         public float measureSeconds;
-        /// <summary>Configured ramp time toward each new parameter set; the
-        /// ACTUAL ramp used was min(this, washoutSeconds) — see SessionController.</summary>
+        /// <summary>Configured ramp time toward each new parameter set.</summary>
         public float transitionSeconds;
+        /// <summary>Configured do-nothing buffer after the ramp, before
+        /// measurement starts (physiological-lag allowance).</summary>
+        public float idleSeconds;
+        /// <summary>Explicit only: configured Phase.Trial length — how long
+        /// the participant drives/experiences the parameter set before being
+        /// asked to rate it. 0/unused for Implicit trials.</summary>
+        public float explicitTrialSeconds;
 
         /// <summary>Shared activation shaping every channel's deviation into the
         /// minimized objective: "Linear", "ReLU" or "Tanh".</summary>

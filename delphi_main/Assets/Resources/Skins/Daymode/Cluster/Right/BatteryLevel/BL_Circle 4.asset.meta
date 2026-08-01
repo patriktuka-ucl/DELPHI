@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: be32967d339121a4c89ee2e55f2fda1c
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Daymode/Cluster/Right/BatteryLevel/BL_Circle
+    4.asset
+  uploadId: 949372

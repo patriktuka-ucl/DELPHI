@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: f328547425b1e924a81534a4fd164cf7
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Prefabs/UI/Cluster/Graph/TopAlignedSquare.prefab
+  uploadId: 949372

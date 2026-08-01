@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: dca71e1a127b1d84685d248504c4295e
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Daymode/Cluster/Right/Mediaplayer/MP_TimeCurrentText.asset
+  uploadId: 949372

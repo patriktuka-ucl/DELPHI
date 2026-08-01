@@ -36,6 +36,14 @@ DEVICE_ADDRESS = "24:AC:AC:1D:A3:9C"  # Polar H10 1DA39C31
 
 HEART_RATE_MEASUREMENT_UUID = "00002a37-0000-1000-8000-00805f9b34fb"
 
+# Standard BLE Battery Service characteristic — same GATT table as the Heart
+# Rate service above, so reading it costs nothing extra on the connection
+# (no separate pairing/service discovery). Polled occasionally rather than
+# subscribed to: battery % changes slowly, and doesn't need per-sample
+# notification traffic the way HR/ACC do.
+BATTERY_LEVEL_UUID = "00002a19-0000-1000-8000-00805f9b34fb"
+BATTERY_POLL_INTERVAL_S = 60.0
+
 # Polar's proprietary PMD (Polar Measurement Data) service — not part of the
 # standard BLE Heart Rate profile, needed for raw accelerometer (and ECG)
 # access. UUIDs and frame format confirmed against Polar's own PMD spec and
@@ -76,6 +84,7 @@ OSC_RR_ADDRESS = "/PolarH10/RR"
 OSC_ACC_X_ADDRESS = "/PolarH10/AccX"
 OSC_ACC_Y_ADDRESS = "/PolarH10/AccY"
 OSC_ACC_Z_ADDRESS = "/PolarH10/AccZ"
+OSC_BATTERY_ADDRESS = "/PolarH10/Battery"
 
 
 def parse_hr_measurement(data: bytearray) -> tuple[int, list[float]]:
@@ -171,6 +180,26 @@ def on_acc_notification(osc_client: SimpleUDPClient, _, data: bytearray) -> None
               f"| {_acc_report['count'] / elapsed:5.1f} samples/s")
         _acc_report["count"] = 0
         _acc_report["t"] = now
+
+
+async def poll_battery(client, osc_client: SimpleUDPClient) -> None:
+    """Reads the standard Battery Level characteristic every
+    BATTERY_POLL_INTERVAL_S over the already-open connection and forwards it
+    over OSC. Runs alongside HR/ACC as a background task; a read failure
+    (e.g. a strap that doesn't expose the service) just skips that cycle
+    rather than tearing down the rest of the stream."""
+    while client.is_connected:
+        try:
+            raw = await client.read_gatt_char(BATTERY_LEVEL_UUID)
+            percent = raw[0]
+            if VERBOSE:
+                print(f"Battery: {percent}%")
+            osc_client.send_message(OSC_BATTERY_ADDRESS, float(percent))
+        except Exception as e:
+            if not client.is_connected:
+                return
+            print(f"  Battery: read failed ({e}) — will retry next cycle.")
+        await asyncio.sleep(BATTERY_POLL_INTERVAL_S)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -507,6 +536,7 @@ async def main(acc_rate_hz: int = DEFAULT_ACC_RATE_HZ, device_address: str = "",
 
         t0 = time.monotonic()
         acc_task = None
+        battery_task = None
         try:
             # The scan-free connect QUEUES in the Windows stack and completes as
             # soon as the strap is reachable, so it must be bounded — otherwise a
@@ -518,6 +548,7 @@ async def main(acc_rate_hz: int = DEFAULT_ACC_RATE_HZ, device_address: str = "",
             # Accelerometer arms itself in the background and keeps retrying
             # until confirmed — see start_accelerometer's docstring for why.
             acc_task = start_accelerometer(client, osc_client, acc_command, acc_rate_hz)
+            battery_task = asyncio.create_task(poll_battery(client, osc_client))
 
             fast_failures = 0
             target = None    # bond is good; go back to the scan-free path on reconnect
@@ -555,6 +586,8 @@ async def main(acc_rate_hz: int = DEFAULT_ACC_RATE_HZ, device_address: str = "",
         finally:
             if acc_task is not None:
                 acc_task.cancel()
+            if battery_task is not None:
+                battery_task.cancel()
             # Always tear the link down properly: a half-open connection is what
             # makes the NEXT connect slow.
             try:

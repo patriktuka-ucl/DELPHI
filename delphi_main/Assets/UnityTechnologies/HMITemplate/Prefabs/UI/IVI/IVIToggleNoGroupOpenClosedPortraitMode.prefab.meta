@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 9a04814febc7a414a94c765c5924dc1b
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Prefabs/UI/IVI/IVIToggleNoGroupOpenClosedPortraitMode.prefab
+  uploadId: 949372

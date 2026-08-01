@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 0d0ad0918af462f469fdd0558cff77e4
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Prefabs/Services/CarSystems.prefab
+  uploadId: 949372

@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 7586f4859313dfc43ae98a6742660caa
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Daymode/Cluster/Right/BatteryLevel/BL_Dots.asset
+  uploadId: 949372

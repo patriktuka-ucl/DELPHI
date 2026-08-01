@@ -1,0 +1,174 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!687078895 &4343727234628468602
+SpriteAtlas:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: HVAC Atlas
+  m_EditorData:
+    serializedVersion: 2
+    textureSettings:
+      serializedVersion: 2
+      anisoLevel: 1
+      compressionQuality: 50
+      maxTextureSize: 2048
+      textureCompression: 0
+      filterMode: 1
+      generateMipMaps: 0
+      readable: 0
+      crunchedCompression: 0
+      sRGB: 1
+    platformSettings:
+    - serializedVersion: 4
+      m_BuildTarget: DefaultTexturePlatform
+      m_MaxTextureSize: 2048
+      m_ResizeAlgorithm: 0
+      m_TextureFormat: -1
+      m_TextureCompression: 0
+      m_CompressionQuality: 50
+      m_CrunchedCompression: 0
+      m_AllowsAlphaSplitting: 0
+      m_Overridden: 0
+      m_IgnorePlatformSupport: 0
+      m_AndroidETC2FallbackOverride: 0
+      m_ForceMaximumCompressionQuality_BC6H_BC7: 0
+    packingSettings:
+      serializedVersion: 2
+      padding: 4
+      blockOffset: 1
+      allowAlphaSplitting: 0
+      enableRotation: 1
+      enableTightPacking: 0
+      enableAlphaDilation: 0
+    secondaryTextureSettings: {}
+    variantMultiplier: 1
+    packables:
+    - {fileID: 2800000, guid: 209c4c219b864bc43bee4c393c455649, type: 3}
+    - {fileID: 2800000, guid: 443e5646bc966f44f801b1049235e19b, type: 3}
+    - {fileID: 2800000, guid: 59356068959441a4f84cbee7f1a250eb, type: 3}
+    - {fileID: 2800000, guid: 829d8b3e2c5abab478d5572148328807, type: 3}
+    - {fileID: 2800000, guid: ea178f0ea6ffe29468ad0f1ee6390f9b, type: 3}
+    - {fileID: 2800000, guid: ed652734c9c1e1e4883186f64c164cfb, type: 3}
+    - {fileID: 2800000, guid: fb9c6c5222760064490f019977266d7a, type: 3}
+    - {fileID: 2800000, guid: 68ab4637b9726404ab80ac0805eb94bb, type: 3}
+    - {fileID: 2800000, guid: 59270429eab620b4c9282a2fd2b3fd12, type: 3}
+    - {fileID: 2800000, guid: 5378e4c8e8272524db771febfcb7b66f, type: 3}
+    - {fileID: 2800000, guid: 31ec556e50abbea4780ea484aa7f492c, type: 3}
+    - {fileID: 2800000, guid: 8d10cc9e35e202144a4fa1998d74d4b9, type: 3}
+    - {fileID: 2800000, guid: 80be4653a743bd748bf4ef3d22f93edf, type: 3}
+    - {fileID: 2800000, guid: 9d6cf0627f9831c4597a4c640c50bbec, type: 3}
+    - {fileID: 2800000, guid: 9b77f53c52a5b76448092eac815555d6, type: 3}
+    - {fileID: 2800000, guid: 27b17e02b3f781646af597b333d487f6, type: 3}
+    - {fileID: 2800000, guid: 8794f48a82ce77c43a38c62e0fd819d2, type: 3}
+    - {fileID: 2800000, guid: 238f08cd04a58f04fac13f6f7a8a214e, type: 3}
+    - {fileID: 2800000, guid: b1030d44cfc01ca458063d07b3e0992d, type: 3}
+    - {fileID: 2800000, guid: 25a089ebc065a5a49b4fdebf9aafb82f, type: 3}
+    - {fileID: 2800000, guid: d515b44d244685549a20123a0d0d7dc4, type: 3}
+    - {fileID: 2800000, guid: 2bb9ef734dd5d064b92f4b44eff2d57f, type: 3}
+    - {fileID: 2800000, guid: 5c8764aeb3c3cb741a6eecc8159d4a20, type: 3}
+    - {fileID: 2800000, guid: d515b44d244685549a20123a0d0d7dc4, type: 3}
+    - {fileID: 2800000, guid: 8a01e887dbe6b3a4bb59cd3d1dc5891a, type: 3}
+    - {fileID: 2800000, guid: 7080f5cde67172a46b1c2b3fbb43e6dc, type: 3}
+    - {fileID: 2800000, guid: 1feae817795670d479a906ec9bd608f7, type: 3}
+    - {fileID: 2800000, guid: 79ab93f6e2da67e49b99f97ffb6ac614, type: 3}
+    - {fileID: 2800000, guid: 6201a2ce27965924d92c1aa32f0d8244, type: 3}
+    - {fileID: 2800000, guid: 61f6eb92fc9d7804d9b3d2741602ccc7, type: 3}
+    bindAsDefault: 1
+    isAtlasV2: 0
+    cachedData: {fileID: 0}
+    packedSpriteRenderDataKeys:
+    - 209c4c219b864bc43bee4c393c455649: 21300000
+    - 27b17e02b3f781646af597b333d487f6: 21300000
+    - fb9c6c5222760064490f019977266d7a: 21300000
+    - 9d6cf0627f9831c4597a4c640c50bbec: 21300000
+    - 61f6eb92fc9d7804d9b3d2741602ccc7: 21300000
+    - 80be4653a743bd748bf4ef3d22f93edf: 21300000
+    - 2bb9ef734dd5d064b92f4b44eff2d57f: 21300000
+    - ed652734c9c1e1e4883186f64c164cfb: 21300000
+    - b1030d44cfc01ca458063d07b3e0992d: 21300000
+    - 443e5646bc966f44f801b1049235e19b: 21300000
+    - 79ab93f6e2da67e49b99f97ffb6ac614: 21300000
+    - 1feae817795670d479a906ec9bd608f7: 21300000
+    - 68ab4637b9726404ab80ac0805eb94bb: 21300000
+    - 8a01e887dbe6b3a4bb59cd3d1dc5891a: 21300000
+    - 59356068959441a4f84cbee7f1a250eb: 21300000
+    - 5378e4c8e8272524db771febfcb7b66f: 21300000
+    - 59270429eab620b4c9282a2fd2b3fd12: 21300000
+    - 8794f48a82ce77c43a38c62e0fd819d2: 21300000
+    - 25a089ebc065a5a49b4fdebf9aafb82f: 21300000
+    - 9b77f53c52a5b76448092eac815555d6: 21300000
+    - d515b44d244685549a20123a0d0d7dc4: 21300000
+    - 7080f5cde67172a46b1c2b3fbb43e6dc: 21300000
+    - 238f08cd04a58f04fac13f6f7a8a214e: 21300000
+    - ea178f0ea6ffe29468ad0f1ee6390f9b: 21300000
+    - 829d8b3e2c5abab478d5572148328807: 21300000
+    - 31ec556e50abbea4780ea484aa7f492c: 21300000
+    - 8d10cc9e35e202144a4fa1998d74d4b9: 21300000
+    - 5c8764aeb3c3cb741a6eecc8159d4a20: 21300000
+    - 6201a2ce27965924d92c1aa32f0d8244: 21300000
+  m_MasterAtlas: {fileID: 0}
+  m_PackedSprites:
+  - {fileID: 21300000, guid: 209c4c219b864bc43bee4c393c455649, type: 3}
+  - {fileID: 21300000, guid: 27b17e02b3f781646af597b333d487f6, type: 3}
+  - {fileID: 21300000, guid: fb9c6c5222760064490f019977266d7a, type: 3}
+  - {fileID: 21300000, guid: 9d6cf0627f9831c4597a4c640c50bbec, type: 3}
+  - {fileID: 21300000, guid: 61f6eb92fc9d7804d9b3d2741602ccc7, type: 3}
+  - {fileID: 21300000, guid: 80be4653a743bd748bf4ef3d22f93edf, type: 3}
+  - {fileID: 21300000, guid: 2bb9ef734dd5d064b92f4b44eff2d57f, type: 3}
+  - {fileID: 21300000, guid: ed652734c9c1e1e4883186f64c164cfb, type: 3}
+  - {fileID: 21300000, guid: b1030d44cfc01ca458063d07b3e0992d, type: 3}
+  - {fileID: 21300000, guid: 443e5646bc966f44f801b1049235e19b, type: 3}
+  - {fileID: 21300000, guid: 79ab93f6e2da67e49b99f97ffb6ac614, type: 3}
+  - {fileID: 21300000, guid: 1feae817795670d479a906ec9bd608f7, type: 3}
+  - {fileID: 21300000, guid: 68ab4637b9726404ab80ac0805eb94bb, type: 3}
+  - {fileID: 21300000, guid: 8a01e887dbe6b3a4bb59cd3d1dc5891a, type: 3}
+  - {fileID: 21300000, guid: 59356068959441a4f84cbee7f1a250eb, type: 3}
+  - {fileID: 21300000, guid: 5378e4c8e8272524db771febfcb7b66f, type: 3}
+  - {fileID: 21300000, guid: 59270429eab620b4c9282a2fd2b3fd12, type: 3}
+  - {fileID: 21300000, guid: 8794f48a82ce77c43a38c62e0fd819d2, type: 3}
+  - {fileID: 21300000, guid: 25a089ebc065a5a49b4fdebf9aafb82f, type: 3}
+  - {fileID: 21300000, guid: 9b77f53c52a5b76448092eac815555d6, type: 3}
+  - {fileID: 21300000, guid: d515b44d244685549a20123a0d0d7dc4, type: 3}
+  - {fileID: 21300000, guid: 7080f5cde67172a46b1c2b3fbb43e6dc, type: 3}
+  - {fileID: 21300000, guid: 238f08cd04a58f04fac13f6f7a8a214e, type: 3}
+  - {fileID: 21300000, guid: ea178f0ea6ffe29468ad0f1ee6390f9b, type: 3}
+  - {fileID: 21300000, guid: 829d8b3e2c5abab478d5572148328807, type: 3}
+  - {fileID: 21300000, guid: 31ec556e50abbea4780ea484aa7f492c, type: 3}
+  - {fileID: 21300000, guid: 8d10cc9e35e202144a4fa1998d74d4b9, type: 3}
+  - {fileID: 21300000, guid: 5c8764aeb3c3cb741a6eecc8159d4a20, type: 3}
+  - {fileID: 21300000, guid: 6201a2ce27965924d92c1aa32f0d8244, type: 3}
+  m_PackedSpriteNamesToIndex:
+  - AirInIcon_Default
+  - MinusIcon_Default
+  - CirculateIcon_Highlight
+  - HvacArrowOff
+  - SyncButton_Button
+  - FanSpeedIcon_Right_Highlight
+  - SeatMassage_Default
+  - CirculateIcon_Default
+  - PlusIcon_Highlight
+  - AirInIcon_Highlight
+  - SeatTemp_Stage3
+  - SeatTemp_Stage2
+  - FanSpeed_SpeedIndicator_Left
+  - SeatTemp_Off
+  - Chair1
+  - FanSpeedIcon_Left_Default
+  - FanSpeed_SpeedIndicator_Right
+  - MinusIcon_Highlight
+  - SeatHeaterIcon_Left
+  - HvacArrowOn
+  - SeatHeaterIcon_Right
+  - SeatTemp_Stage1
+  - PlusIcon_Default
+  - CircleShadow
+  - Chair2
+  - FanSpeedIcon_Left_Highlight
+  - FanSpeedIcon_Right_Default
+  - SeatMassage_Highlight
+  - SyncButton_ActivationLight
+  m_RenderDataMap: {}
+  m_Tag: HVAC Atlas
+  m_IsVariant: 0

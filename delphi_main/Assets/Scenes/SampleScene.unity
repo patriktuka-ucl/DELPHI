@@ -817,6 +817,68 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 393181347}
   m_Mesh: {fileID: 10209, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!1001 &483967867
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 1008096562}
+    m_Modifications:
+    - target: {fileID: 4012470305715600586, guid: f137f954a21924041b677fc40b73a976, type: 3}
+      propertyPath: m_Name
+      value: Luxury Car
+      objectReference: {fileID: 0}
+    - target: {fileID: 4012470305715691754, guid: f137f954a21924041b677fc40b73a976, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 70.61
+      objectReference: {fileID: 0}
+    - target: {fileID: 4012470305715691754, guid: f137f954a21924041b677fc40b73a976, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4012470305715691754, guid: f137f954a21924041b677fc40b73a976, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: -18.96
+      objectReference: {fileID: 0}
+    - target: {fileID: 4012470305715691754, guid: f137f954a21924041b677fc40b73a976, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4012470305715691754, guid: f137f954a21924041b677fc40b73a976, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0.000000021855694
+      objectReference: {fileID: 0}
+    - target: {fileID: 4012470305715691754, guid: f137f954a21924041b677fc40b73a976, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4012470305715691754, guid: f137f954a21924041b677fc40b73a976, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: -0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4012470305715691754, guid: f137f954a21924041b677fc40b73a976, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4012470305715691754, guid: f137f954a21924041b677fc40b73a976, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4012470305715691754, guid: f137f954a21924041b677fc40b73a976, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: f137f954a21924041b677fc40b73a976, type: 3}
+--- !u!4 &483967868 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 4012470305715691754, guid: f137f954a21924041b677fc40b73a976, type: 3}
+  m_PrefabInstance: {fileID: 483967867}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &500385126
 GameObject:
   m_ObjectHideFlags: 0
@@ -1790,6 +1852,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Delphi.Motion.MotionLogWriter
   recorder: {fileID: 1798600215}
   cues: {fileID: 0}
+  rumble: {fileID: 0}
   logRateHz: 30
 --- !u!114 &811196811
 MonoBehaviour:
@@ -1895,7 +1958,7 @@ MonoBehaviour:
   minHz: 10
   maxHz: 100
   roadBedEnabled: 1
-  roadBedLevel: 0.18
+  roadBedStrength: 0.18
   roadBedReferenceKmh: 50
   roadBedHz: 40
   longitudinalEnabled: 1
@@ -2180,16 +2243,17 @@ MonoBehaviour:
   orderIndex: 1
   userId: P0
   conditionId: pilot
-  baselineWindowSeconds: 10
-  baselineWindowEndOffsetSeconds: 5
+  meditationAcclimatisationSeconds: 3
+  meditationMeasurementSeconds: 3
+  meditationFadeoutSeconds: 3
   exploreNudgeIdleSeconds: 0
   exploreNudgeMaxAuto: 2
   freeRoamEstimatedSeconds: 300
   implicitTrial:
-    iterations: 5
+    iterations: 8
     samplingIterations: 3
   explicitTrial:
-    iterations: 5
+    iterations: 8
     samplingIterations: 3
   activation: 0
   boundK: 3
@@ -2236,17 +2300,17 @@ MonoBehaviour:
   - channel: 13
     sd: 20
     higherIsBetter: 0
-  questionnaireMin: 1
-  questionnaireMax: 21
-  windowSeconds: 40
-  washoutSeconds: 10
   transitionSeconds: 3
+  idleSeconds: 7
+  measurementSeconds: 30
+  explicitTrialSeconds: 20
   pythonPath: 
   seed: 3
   numRestarts: 3
   rawSamples: 128
   mcSamples: 64
   optimizerResponseTimeoutSeconds: 180
+  boProcessingEstimateSeconds: 2
 --- !u!1 &900000020
 GameObject:
   m_ObjectHideFlags: 0
@@ -2654,6 +2718,7 @@ Transform:
   - {fileID: 2145559031}
   - {fileID: 987965044}
   - {fileID: 2026581115}
+  - {fileID: 483967868}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1032869433
@@ -3647,6 +3712,7 @@ MonoBehaviour:
   listenPort: 9500
   hrAddress: /PolarH10/HR
   rrAddress: /PolarH10/RR
+  batteryAddress: /PolarH10/Battery
   logParseErrors: 0
   rrHistorySize: 12
   accXAddress: /PolarH10/AccX
@@ -3965,18 +4031,18 @@ MonoBehaviour:
   hrvRmssd: {fileID: 1630552711}
   respRateOn: 0
   respRate: {fileID: 0}
-  gsrOn: 1
+  gsrOn: 0
   gsr: {fileID: 705783339}
   gsrTonicOn: 0
   gsrTonic: {fileID: 0}
-  gsrPhasicOn: 0
+  gsrPhasicOn: 1
   gsrPhasic: {fileID: 0}
   gazeRateHz: 60
   blinkIntervalOn: 1
   blinkInterval: {fileID: 195838079}
   gazeOn: 1
   gaze: {fileID: 927858437}
-  pupilDiameterOn: 1
+  pupilDiameterOn: 0
   pupilDiameter: {fileID: 996267227}
   imuRateHz: 60
   accXOn: 0
@@ -3988,19 +4054,19 @@ MonoBehaviour:
   debugConstantFeed: 0
   debugValue: 3
   _debugSavedOn: 
-  webcamOn: 1
+  webcamOn: 0
   webcam: {fileID: 1425785811}
   webcamFps: 30
-  trackOverviewOn: 1
+  trackOverviewOn: 0
   trackOverview: {fileID: 1531519421}
   trackOverviewFps: 30
-  playerViewOn: 1
+  playerViewOn: 0
   playerView: {fileID: 988303697}
   playerViewFps: 30
-  panorama360On: 1
+  panorama360On: 0
   panorama360: {fileID: 1425288970}
   panorama360Fps: 10
-  eyeCamerasOn: 1
+  eyeCamerasOn: 0
   eyeCameras: {fileID: 2068766581}
   eyeCamerasFps: 15
 --- !u!4 &1745511444

@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: b5de8a322a3fe9444a2175abd1b943f4
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Models/Car/Exterior/Materials/Aluminum.mat
+  uploadId: 949372

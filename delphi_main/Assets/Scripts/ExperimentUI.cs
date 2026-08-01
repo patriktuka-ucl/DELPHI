@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using UnityEngine;
 using UnityEngine.UI;
@@ -144,20 +145,33 @@ namespace Delphi
         // ══ Per-frame ════════════════════════════════════════════════════
         private void Update()
         {
+            // Real input handling / cheap value-change polling: has to run
+            // every frame regardless of redrawFps.
             HandleKeyboard();
-            RefreshTimeline();
-            RefreshSessionCard();
-            RefreshTrialCard();
-            RefreshBaselineCard();
-            RefreshForcesGizmo();
-            RefreshConnectionsCard();
-            RefreshTransport();
             RefreshOverheadTuning();
             RefreshFrameTuning();
             PollEvents();
 
+            // Everything below is a pure "read current state → redraw a
+            // card" pass — no accumulation, no state that would be lost by
+            // skipping a frame — so all of it rides the same redrawFps
+            // throttle RefreshSensors already used alone. At a 90Hz VR frame
+            // rate these were collectively ~54 string interpolations EVERY
+            // frame; now they run at redrawFps (default 10Hz) like the rest
+            // of the dashboard.
             _redrawTimer += Time.deltaTime;
-            if (_redrawTimer >= RedrawInterval) { _redrawTimer = 0f; RefreshSensors(); }
+            if (_redrawTimer >= RedrawInterval)
+            {
+                _redrawTimer = 0f;
+                RefreshTimeline();
+                RefreshSessionCard();
+                RefreshTrialCard();
+                RefreshBaselineCard();
+                RefreshForcesGizmo();
+                RefreshConnectionsCard();
+                RefreshTransport();
+                RefreshSensors();
+            }
         }
 
         // ════════════════════════════════════════════════════════════════
@@ -182,7 +196,11 @@ namespace Delphi
         /// of the C# name:
         ///   - Washout → PARAMETER_TRANSITION (that's literally what it is:
         ///     the ramp into the new parameter set settling, plus physiology
-        ///     catching up, before Measuring starts)
+        ///     catching up, before Measuring/Trial starts)
+        ///   - Trial → TRIAL_DRIVE (Explicit only: the participant drives/
+        ///     experiences the current parameter set for a fixed
+        ///     explicitTrialSeconds before AwaitingRating asks them to rate
+        ///     it — Implicit's equivalent fixed phase is Measuring instead)
         ///   - AwaitingRating → TRIAL_EVALUATION (the participant's rating of
         ///     ONE iteration/trial's parameter set — happens up to `iterations`
         ///     times per condition, feeds the optimizer directly)
@@ -205,6 +223,7 @@ namespace Delphi
             SessionController.Phase.WaitingForOptimizer    => "WAITING_FOR_OPTIMIZER",
             SessionController.Phase.WaitingForParameters   => "WAITING_FOR_PARAMETERS",
             SessionController.Phase.Washout                => "PARAMETER_TRANSITION",
+            SessionController.Phase.Trial                  => "TRIAL_DRIVE",
             SessionController.Phase.Measuring              => "MEASURING",
             SessionController.Phase.AwaitingRating         => "TRIAL_EVALUATION",
             SessionController.Phase.Questionnaire          => "CONDITION_EVALUATION",
@@ -310,10 +329,17 @@ namespace Delphi
         // ════════════════════════════════════════════════════════════════
         private Image _optDot;
         private Text _optLabel, _iterTxt, _hvTxt, _trackPosTxt;
-        private static readonly string[] ParamLabels =
-            { "Acceleration", "Braking", "Follow dist", "Corner spd" };
-        private Slider[] _paramBars = new Slider[ParamLabels.Length];
-        private Text[] _paramVals = new Text[ParamLabels.Length];
+        private Slider[] _paramBars = new Slider[DrivingParameterRegistry.All.Length];
+        private Text[] _paramVals = new Text[DrivingParameterRegistry.All.Length];
+
+        // ── Pareto-front plot — see RefreshParetoPlot ───────────────────
+        private RawImage _paretoPlotImg;
+        private Texture2D _paretoTex;
+        private Text _paretoAxisTxt;
+        private string _paretoCsvPath;
+        private DateTime _paretoCsvLastWrite;
+        private List<BoObservationRow> _paretoRows = new();
+        private string[] _paretoObjectiveKeys = Array.Empty<string>();
 
         private void RefreshTrialCard()
         {
@@ -344,13 +370,216 @@ namespace Delphi
             if (session.carDriver != null)
             {
                 var p = session.carDriver.parameters;
-                float[] v = { p.accelerationJerk, p.brakingJerk, p.followDistance,
-                              p.corneringSpeed };
-                for (int i = 0; i < ParamLabels.Length; i++)
+                for (int i = 0; i < DrivingParameterRegistry.All.Length; i++)
                 {
-                    _paramBars[i].SetValueWithoutNotify(v[i]);
-                    _paramVals[i].text = v[i].ToString("F2");
+                    float v = DrivingParameterRegistry.All[i].Get(p);
+                    _paramBars[i].SetValueWithoutNotify(v);
+                    _paramVals[i].text = v.ToString("F2");
                 }
+            }
+
+            RefreshParetoPlot();
+        }
+
+        /// <summary>One row of mobo.py's own ObservationsPerEvaluation.csv —
+        /// only the columns the plot needs.</summary>
+        private readonly struct BoObservationRow
+        {
+            public readonly int iteration;
+            public readonly bool isPareto;
+            public readonly float[] objectives;
+            public BoObservationRow(int iteration, bool isPareto, float[] objectives)
+            { this.iteration = iteration; this.isPareto = isPareto; this.objectives = objectives; }
+        }
+
+        /// <summary>Finds the current run's ObservationsPerEvaluation.csv
+        /// (mobo.py writes one per condition run under
+        /// StreamingAssets/BOData/BayesianOptimization/LogData/&lt;user&gt;/
+        /// &lt;condition&gt;/run_N/), re-parsing only when its mtime has
+        /// changed — it's appended to roughly once per iteration, not every
+        /// redraw tick — then draws objective 1 vs objective 2 with the
+        /// Pareto frontier (mobo.py's own IsPareto flag, no dominance
+        /// recomputed here) highlighted.</summary>
+        private void RefreshParetoPlot()
+        {
+            if (_paretoTex == null) return;
+
+            string path = FindLatestObservationsCsv();
+            if (path == null)
+            {
+                _paretoAxisTxt.text = "Pareto front — no BO run logged yet";
+                ClearParetoTexture();
+                return;
+            }
+
+            DateTime lastWrite = File.GetLastWriteTimeUtc(path);
+            if (path != _paretoCsvPath || lastWrite != _paretoCsvLastWrite)
+            {
+                _paretoCsvPath = path;
+                _paretoCsvLastWrite = lastWrite;
+                ParseObservationsCsv(path, _paretoRows, out _paretoObjectiveKeys);
+            }
+
+            if (_paretoRows.Count == 0 || _paretoObjectiveKeys.Length < 2)
+            {
+                _paretoAxisTxt.text = _paretoRows.Count == 0
+                    ? "Pareto front — no evaluations logged yet"
+                    : "Pareto front — needs 2+ objectives to plot";
+                ClearParetoTexture();
+                return;
+            }
+
+            _paretoAxisTxt.text = $"Pareto front — {_paretoObjectiveKeys[0]} vs {_paretoObjectiveKeys[1]} " +
+                                  $"({_paretoRows.Count} evaluations)";
+            DrawParetoTexture(_paretoRows);
+        }
+
+        private static string FindLatestObservationsCsv()
+        {
+            string root = Path.Combine(Application.streamingAssetsPath, "BOData", "BayesianOptimization", "LogData");
+            if (!Directory.Exists(root)) return null;
+
+            string best = null;
+            DateTime bestTime = DateTime.MinValue;
+            foreach (var file in Directory.EnumerateFiles(root, "ObservationsPerEvaluation.csv", SearchOption.AllDirectories))
+            {
+                var t = File.GetLastWriteTimeUtc(file);
+                if (t > bestTime) { bestTime = t; best = file; }
+            }
+            return best;
+        }
+
+        private static void ParseObservationsCsv(string path, List<BoObservationRow> rows, out string[] objectiveKeys)
+        {
+            rows.Clear();
+            objectiveKeys = Array.Empty<string>();
+            string[] lines;
+            try { lines = File.ReadAllLines(path); }
+            catch { return; }
+            if (lines.Length < 2) return;
+
+            // Fixed columns per expected_observation_columns() in mobo.py:
+            // UserID;ConditionID;GroupID;Timestamp;Iteration;Phase;IsPareto; then objectives, then parameters.
+            string[] header = lines[0].Split(';');
+            const int FixedCols = 7;
+            int objectiveCount = Mathf.Max(0, header.Length - FixedCols);
+            // Parameter columns follow the objectives 1:1 with what SendInit
+            // sent, but we only need the objective names/count for the plot.
+            objectiveKeys = new string[Mathf.Min(objectiveCount, header.Length - FixedCols)];
+            for (int i = 0; i < objectiveKeys.Length; i++) objectiveKeys[i] = header[FixedCols + i];
+
+            for (int li = 1; li < lines.Length; li++)
+            {
+                if (string.IsNullOrWhiteSpace(lines[li])) continue;
+                string[] cells = lines[li].Split(';');
+                if (cells.Length < FixedCols + objectiveKeys.Length) continue;
+
+                if (!int.TryParse(cells[4], out int iteration)) continue;
+                bool isPareto = string.Equals(cells[6], "TRUE", StringComparison.OrdinalIgnoreCase);
+
+                var objectives = new float[objectiveKeys.Length];
+                bool ok = true;
+                for (int i = 0; i < objectiveKeys.Length; i++)
+                    ok &= float.TryParse(cells[FixedCols + i], System.Globalization.NumberStyles.Float,
+                                          System.Globalization.CultureInfo.InvariantCulture, out objectives[i]);
+                if (!ok) continue;
+
+                rows.Add(new BoObservationRow(iteration, isPareto, objectives));
+            }
+        }
+
+        private void ClearParetoTexture()
+        {
+            var px = _paretoTex.GetPixels32();
+            var bg = (Color32)_card2;
+            for (int i = 0; i < px.Length; i++) px[i] = bg;
+            _paretoTex.SetPixels32(px);
+            _paretoTex.Apply();
+        }
+
+        private void DrawParetoTexture(List<BoObservationRow> rows)
+        {
+            int w = _paretoTex.width, h = _paretoTex.height;
+            var bg = (Color32)_card2;
+            var px = new Color32[w * h];
+            for (int i = 0; i < px.Length; i++) px[i] = bg;
+
+            float xMin = float.MaxValue, xMax = float.MinValue, yMin = float.MaxValue, yMax = float.MinValue;
+            foreach (var r in rows)
+            {
+                xMin = Mathf.Min(xMin, r.objectives[0]); xMax = Mathf.Max(xMax, r.objectives[0]);
+                yMin = Mathf.Min(yMin, r.objectives[1]); yMax = Mathf.Max(yMax, r.objectives[1]);
+            }
+            if (xMax - xMin < 1e-6f) { xMin -= 1f; xMax += 1f; }
+            if (yMax - yMin < 1e-6f) { yMin -= 1f; yMax += 1f; }
+
+            const int margin = 6;
+            Vector2Int ToPixel(float x, float y) => new Vector2Int(
+                margin + Mathf.RoundToInt((w - 2 * margin - 1) * Mathf.InverseLerp(xMin, xMax, x)),
+                margin + Mathf.RoundToInt((h - 2 * margin - 1) * Mathf.InverseLerp(yMin, yMax, y)));
+
+            // Frontier line through the Pareto points, sorted along X.
+            var pareto = rows.Where(r => r.isPareto).OrderBy(r => r.objectives[0]).ToList();
+            for (int i = 1; i < pareto.Count; i++)
+            {
+                var a = ToPixel(pareto[i - 1].objectives[0], pareto[i - 1].objectives[1]);
+                var b = ToPixel(pareto[i].objectives[0], pareto[i].objectives[1]);
+                PlotLine(px, w, h, a, b, (Color32)_accent);
+            }
+
+            for (int i = 0; i < rows.Count; i++)
+            {
+                var p = ToPixel(rows[i].objectives[0], rows[i].objectives[1]);
+                bool isLatest = i == rows.Count - 1;
+                Color32 c = rows[i].isPareto ? (Color32)_accent : (Color32)_dim;
+                PlotDisc(px, w, h, p, isLatest ? 3 : 2, c);
+                if (isLatest) PlotRing(px, w, h, p, 5, (Color32)Color.white);
+            }
+
+            _paretoTex.SetPixels32(px);
+            _paretoTex.Apply();
+        }
+
+        private static void PlotDisc(Color32[] px, int w, int h, Vector2Int center, int radius, Color32 c)
+        {
+            for (int dy = -radius; dy <= radius; dy++)
+            for (int dx = -radius; dx <= radius; dx++)
+            {
+                if (dx * dx + dy * dy > radius * radius) continue;
+                int x = center.x + dx, y = center.y + dy;
+                if (x < 0 || x >= w || y < 0 || y >= h) continue;
+                px[y * w + x] = c;
+            }
+        }
+
+        private static void PlotRing(Color32[] px, int w, int h, Vector2Int center, int radius, Color32 c)
+        {
+            const int steps = 24;
+            for (int i = 0; i < steps; i++)
+            {
+                float a = i / (float)steps * Mathf.PI * 2f;
+                int x = center.x + Mathf.RoundToInt(Mathf.Cos(a) * radius);
+                int y = center.y + Mathf.RoundToInt(Mathf.Sin(a) * radius);
+                if (x < 0 || x >= w || y < 0 || y >= h) continue;
+                px[y * w + x] = c;
+            }
+        }
+
+        private static void PlotLine(Color32[] px, int w, int h, Vector2Int a, Vector2Int b, Color32 c)
+        {
+            // Bresenham — this is a handful of short segments between Pareto
+            // points, never a hot path, so simplicity wins over a fancier AA line.
+            int x0 = a.x, y0 = a.y, x1 = b.x, y1 = b.y;
+            int dx = Mathf.Abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+            int dy = -Mathf.Abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+            int err = dx + dy;
+            while (true)
+            {
+                if (x0 >= 0 && x0 < w && y0 >= 0 && y0 < h) px[y0 * w + x0] = c;
+                if (x0 == x1 && y0 == y1) break;
+                int e2 = 2 * err;
+                if (e2 >= dy) { err += dy; x0 += sx; }
+                if (e2 <= dx) { err += dx; y0 += sy; }
             }
         }
 
@@ -967,15 +1196,23 @@ namespace Delphi
         /// Refused once the session is running, for the same reason the
         /// buttons disappear then: the order determines the segment plan, which
         /// was already built at StartSession.</summary>
+        // Hoisted out of HandleOrderKeys: that method runs from HandleKeyboard
+        // EVERY frame during a live session (it's only skipped once a
+        // recording is loaded for playback), so a `new Key[]` inline was a
+        // fresh heap array 45-90 times a second for the entire session —
+        // steady GC pressure from a method that, on almost every call, does
+        // nothing but scan six keys that weren't pressed.
+        private static readonly Key[] OrderNumpadKeys =
+        {
+            Key.Numpad1, Key.Numpad2, Key.Numpad3,
+            Key.Numpad4, Key.Numpad5, Key.Numpad6
+        };
+
         private void HandleOrderKeys(Keyboard kb)
         {
             if (session == null) return;
 
-            Key[] numpad =
-            {
-                Key.Numpad1, Key.Numpad2, Key.Numpad3,
-                Key.Numpad4, Key.Numpad5, Key.Numpad6
-            };
+            Key[] numpad = OrderNumpadKeys;
 
             for (int i = 0; i < numpad.Length; i++)
             {
@@ -1504,7 +1741,9 @@ namespace Delphi
         // was not — the last channels simply spilled out of the bottom.
         private const float LeftColX = EdgeMargin, LeftColW = 452f;
         private const float SessionCardY = ColumnTopY, SessionCardH = 294;
-        private const float TrialCardY = SessionCardY - SessionCardH - 12, TrialCardH = 212;
+        // +160 over the base 212: room for the Pareto-front plot under the
+        // parameter rows (see BuildTrialCard/RefreshParetoPlot).
+        private const float TrialCardY = SessionCardY - SessionCardH - 12, TrialCardH = 372;
         private const float BaselineCardY = TrialCardY - TrialCardH - 8, BaselineCardH = 244;
 
         // Right-column layout (beside the Sensor Grid, GridX0) — Forces
@@ -1544,15 +1783,29 @@ namespace Delphi
             // up under each other, which left-aligned in a 40px box they did not.
             const float labelW = 96f, valueW = 44f, gap = 8f;
             float paramBarW = fullW - labelW - valueW - 2f * gap;
-            for (int i = 0; i < ParamLabels.Length; i++)
+            for (int i = 0; i < DrivingParameterRegistry.All.Length; i++)
             {
                 float y = -108 - i * 24;
-                Txt(host, ParamLabels[i], 12, _dim, new Vector2(inset, y), new Vector2(labelW, 20));
+                Txt(host, DrivingParameterRegistry.All[i].ShortLabel, 12, _dim, new Vector2(inset, y), new Vector2(labelW, 20));
                 _paramBars[i] = Bar(host, new Vector2(inset + labelW + gap, y + 3), new Vector2(paramBarW, 14), _running);
                 _paramVals[i] = Txt(host, "0.50", 12, _dim,
                                     new Vector2(inset + fullW - valueW, y), new Vector2(valueW, 20));
                 _paramVals[i].alignment = TextAnchor.UpperRight;
             }
+
+            // Pareto-front plot — objective 1 vs objective 2 across every
+            // evaluation this run has logged, read from mobo.py's own
+            // ObservationsPerEvaluation.csv (same data BoBridge/mobo.py
+            // already produce; no wire-protocol changes needed). Pareto-
+            // optimal points (mobo.py's own IsPareto flag) in the accent
+            // colour with a frontier line; everything else dim; the most
+            // recent evaluation ringed.
+            const float plotY = -204f, plotH = 140f;
+            _paretoAxisTxt = Txt(host, "Pareto front — objective 1 vs 2", 11, _dim,
+                                 new Vector2(inset, plotY), new Vector2(fullW, 16));
+            _paretoTex = new Texture2D(240, 130, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point };
+            _paretoPlotImg = RawImg(host, new Vector2(inset, plotY - 16), new Vector2(fullW, plotH - 16));
+            _paretoPlotImg.texture = _paretoTex;
         }
 
         private void BuildBaselineCard(Transform root)
@@ -2003,10 +2256,20 @@ namespace Delphi
                       $"(accel {cues.AccelMs2:0.00} m/s²  turn {cues.YawRateDegPerSec:0.0}°/s)"
                     : "tilt — no CarMotionCues found";
                 _connYawCuesTxt.text = tiltLine;
-                _connYawRumbleTxt.text = rum != null
-                    ? $"rumble — pads {yaw.SentRumbleRight}/{yaw.SentRumbleCentre}/{yaw.SentRumbleLeft} " +
-                      $"@ {yaw.SentRumbleHz} Hz  ({(rum.IsSilent ? "silent" : "active")})"
-                    : "rumble — no CarRumbleCues found";
+                // SentRumble* is only ever written inside SendMotionTick(),
+                // which only runs while State == Started — everywhere else it
+                // is holding whatever it last sent (possibly zero, possibly
+                // stale from a previous Play session). Showing it unqualified
+                // when not Started reads as "the rumble model is silent" when
+                // the real story is "nothing is being transported at all" —
+                // the single most common reason rumble isn't felt is simply
+                // that START MOTION was never pressed.
+                _connYawRumbleTxt.text = rum == null
+                    ? "rumble — no CarRumbleCues found"
+                    : yaw.State == YawConnectionState.Started
+                        ? $"rumble — pads {yaw.SentRumbleRight}/{yaw.SentRumbleCentre}/{yaw.SentRumbleLeft} " +
+                          $"@ {yaw.SentRumbleHz} Hz  ({(rum.IsSilent ? "silent" : "active")})"
+                        : $"rumble — model {(rum.IsSilent ? "silent" : "active")}, NOT transported (rig not Started)";
 
                 bool canStart = yaw.State == YawConnectionState.Connected;
                 bool canStop = yaw.State == YawConnectionState.Started;
@@ -2055,7 +2318,9 @@ namespace Delphi
             if (polar == null) { _connPolarTxt.text = "Polar H10: not present in scene"; _connPolarTxt.color = _connPolarDot.color = _dim; }
             else
             {
-                _connPolarTxt.text = polar.HasReceivedData ? "Polar H10: receiving" : "Polar H10: listening, no data yet";
+                float batteryPercent = polar.GetBatteryPercent();
+                string batterySuffix = float.IsNaN(batteryPercent) ? "" : $" ({batteryPercent:F0}% battery)";
+                _connPolarTxt.text = (polar.HasReceivedData ? "Polar H10: receiving" : "Polar H10: listening, no data yet") + batterySuffix;
                 _connPolarTxt.color = _connPolarDot.color = polar.HasReceivedData ? _accent : _pending;
             }
         }
@@ -2283,11 +2548,28 @@ namespace Delphi
         {
             var img = NewImage(parent, _card); var rt = img.rectTransform; rt.anchoredPosition = pos; rt.sizeDelta = size;
 
+            // Thin accent tab down the left edge — a small "this module is
+            // live" touch, purely decorative, shared by every card so the
+            // whole dashboard reads as one consistent system.
+            var tab = NewImage(img.transform, _accent);
+            var tabRt = tab.rectTransform;
+            tabRt.anchoredPosition = Vector2.zero;
+            tabRt.sizeDelta = new Vector2(3f, size.y);
+            tab.raycastTarget = false;
+
             var headerImg = NewImage(img.transform, _card2);
             var hrt = headerImg.rectTransform; hrt.sizeDelta = new Vector2(size.x, CardHeaderH);
             header = hrt;
 
-            var t = Txt(header.transform, title, 14, _accent, new Vector2(14, -8), new Vector2(size.x - 28, 20));
+            // Accent underline separating the header from the card body —
+            // cheap, consistent replacement for a hard flat edge between them.
+            var underline = NewImage(img.transform, _accent);
+            var urt = underline.rectTransform;
+            urt.anchoredPosition = new Vector2(0, -CardHeaderH);
+            urt.sizeDelta = new Vector2(size.x, 2f);
+            underline.raycastTarget = false;
+
+            var t = Txt(header.transform, title, 14, _accent, new Vector2(18, -8), new Vector2(size.x - 34, 20));
             t.fontStyle = FontStyle.Bold;
             return img.transform;
         }
@@ -2306,6 +2588,15 @@ namespace Delphi
 
         private Button BtnObj(Transform parent, string label, Vector2 pos, Vector2 size, Action onClick)
             => Btn(parent, label, pos, size, onClick, out _).GetComponent<Button>();
+
+        private RawImage RawImg(Transform parent, Vector2 pos, Vector2 size)
+        {
+            var go = new GameObject("RawImage", typeof(RawImage)); go.transform.SetParent(parent, false);
+            var rt = go.GetComponent<RectTransform>(); rt.anchorMin = rt.anchorMax = new Vector2(0, 1); rt.pivot = new Vector2(0, 1);
+            rt.anchoredPosition = pos; rt.sizeDelta = size;
+            var img = go.GetComponent<RawImage>(); img.raycastTarget = false;
+            return img;
+        }
 
         private Image Dot(Transform parent, Vector2 pos)
         {

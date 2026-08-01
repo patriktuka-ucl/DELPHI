@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: a2c09f87c24d546428361fdbb7989e1a
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Candy/Cluster/Center/ADAS/AD_CruiseControl_Icon_Off.asset
+  uploadId: 949372

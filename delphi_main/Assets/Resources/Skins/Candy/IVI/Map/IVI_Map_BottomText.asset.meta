@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 18f3a3e3fcff3ad49a202450746de7b4
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Candy/IVI/Map/IVI_Map_BottomText.asset
+  uploadId: 949372

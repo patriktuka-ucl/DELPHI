@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 50138a02375714047b7cd53fcd1109ed
+DefaultImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Scenes/MultiScreenSetup.unity
+  uploadId: 949372

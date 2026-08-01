@@ -148,6 +148,11 @@ namespace Delphi.Session
             source.Stop();
             source.clip = audio;
             source.time = 0f;
+            // Full volume regardless of what the previous line left it at —
+            // the meditation's own fadeout (see SessionController.TickMeditation)
+            // ramps this same source toward 0, and without this reset that
+            // fade would silently carry over into whatever plays next.
+            source.volume = 1f;
             source.Play();
             _current = line;
             _hasCurrent = true;

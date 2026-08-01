@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 8f446a93fc6f64f4783f710174fc9166
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Nightmode/IVI/Charge/IVI_CH_BaseBattery.asset
+  uploadId: 949372

@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: b3c14958ad7d4c34e8c25fb6fedaf53d
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Daymode/Cluster/Center/ADAS/AD_CruiseControl_Text_Off.asset
+  uploadId: 949372

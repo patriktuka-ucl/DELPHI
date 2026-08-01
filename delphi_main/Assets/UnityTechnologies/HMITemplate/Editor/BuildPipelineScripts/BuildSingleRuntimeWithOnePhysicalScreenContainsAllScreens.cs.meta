@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: b0980a08a1187a44d995232bf9ec4921
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Editor/BuildPipelineScripts/BuildSingleRuntimeWithOnePhysicalScreenContainsAllScreens.cs
+  uploadId: 949372

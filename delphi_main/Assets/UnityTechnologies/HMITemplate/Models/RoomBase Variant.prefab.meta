@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 7c07d8d6558054d04ad67b3210f80f90
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Models/RoomBase Variant.prefab
+  uploadId: 949372

@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 59c256d3c680ae447adad4ca8e65ca06
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Prefabs/UI/SkinSwapper.prefab
+  uploadId: 949372

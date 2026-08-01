@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: d3df5e2454a45f748836bc9888accaa0
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Prefabs/UI/IVI/IVI_VolumePopup.prefab
+  uploadId: 949372

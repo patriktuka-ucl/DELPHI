@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: ed26914d08ee55341ad374e311ccdc93
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Timelines/Cluster/Infoscreens/BatteryLevel/FadeOutBatteryLevel.playable
+  uploadId: 949372

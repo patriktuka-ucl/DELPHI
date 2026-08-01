@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 98bb5416c989ea647b1a9813615b4040
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Models/Car/Exterior/Materials/CarChrome.mat
+  uploadId: 949372

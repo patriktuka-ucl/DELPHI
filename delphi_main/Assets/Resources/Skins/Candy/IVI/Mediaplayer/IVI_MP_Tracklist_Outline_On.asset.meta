@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: e749c7fc06692f24ea404693dd52ee84
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Candy/IVI/Mediaplayer/IVI_MP_Tracklist_Outline_On.asset
+  uploadId: 949372

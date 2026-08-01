@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: a97c4c1612482463da3379bc4ab2b60e
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 4343727234628468602
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Sprites/IVI/IVI Atlas.spriteatlas
+  uploadId: 949372

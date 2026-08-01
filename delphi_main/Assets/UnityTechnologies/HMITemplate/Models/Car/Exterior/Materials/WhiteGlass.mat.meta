@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: e3f0aeb738a182a42b8e9b0621cc9609
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Models/Car/Exterior/Materials/WhiteGlass.mat
+  uploadId: 949372

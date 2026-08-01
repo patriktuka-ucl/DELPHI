@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 3a3063273225c5b45be5f36ec90e9cbb
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Data/Displays/ClusterDisplay_1920x720.asset
+  uploadId: 949372

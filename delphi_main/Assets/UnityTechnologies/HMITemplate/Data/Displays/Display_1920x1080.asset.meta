@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: aec67806d51709644b4f71a980cc4c6e
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Data/Displays/Display_1920x1080.asset
+  uploadId: 949372

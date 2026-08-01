@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: 89ca90d350ad7c643959a4e2bd9911db
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Editor/BuildWindow_CustomEditor.cs
+  uploadId: 949372

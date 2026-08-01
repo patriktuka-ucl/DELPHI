@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: b7bdf9dc7dd339b4fb7c03efac750336
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Data/Contacts/Contact2.asset
+  uploadId: 949372

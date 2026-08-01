@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 78e7ec80e33bbbe44bc6369b0c2f56f1
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 7400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Animations/Cluster/StartStopCover/StartStop_FadeOut.anim
+  uploadId: 949372

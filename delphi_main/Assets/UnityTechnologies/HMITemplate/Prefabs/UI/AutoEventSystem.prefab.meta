@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 0f8b19d2857e40145b70e675c2864e33
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Prefabs/UI/AutoEventSystem.prefab
+  uploadId: 949372

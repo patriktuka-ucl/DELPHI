@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: cb593690074f28445bbe5a1a642134c7
+DefaultImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Scenes/IVI.unity
+  uploadId: 949372

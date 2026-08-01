@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: d77e3e0a814ca5e49b115d77e7231b67
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Candy/HVAC/HVAC Fan Dot Off.asset
+  uploadId: 949372

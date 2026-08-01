@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 9cccb8ebf8627a0489218365e711a58a
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Candy/Cluster/ProgressBars.asset
+  uploadId: 949372

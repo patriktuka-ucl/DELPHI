@@ -6,10 +6,21 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/Scenes/SampleScene.unity
-    guid: 99c9720ab356a0642a771bea13969a05
+    path: Assets/UnityTechnologies/HMITemplate/Scenes/IVI.unity
+    guid: cb593690074f28445bbe5a1a642134c7
+  - enabled: 1
+    path: Assets/UnityTechnologies/HMITemplate/Scenes/SplitScreenSetup.unity
+    guid: 902a32fb2598bd6419fdb89502892461
+  - enabled: 1
+    path: Assets/UnityTechnologies/HMITemplate/Scenes/HVAC.unity
+    guid: d409ab10935d28f468e76d5086e79f65
+  - enabled: 1
+    path: Assets/UnityTechnologies/HMITemplate/Scenes/Cluster.unity
+    guid: 5353b6079660e8747a8042412aa8bcb1
+  - enabled: 1
+    path: Assets/UnityTechnologies/HMITemplate/Scenes/MultiScreenSetup.unity
+    guid: 50138a02375714047b7cd53fcd1109ed
   m_configObjects:
     Varjo.XR.Settings: {fileID: 11400000, guid: ccda3df59a475ac49b605abba791cc7d, type: 2}
-    com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
     com.unity.xr.arfoundation.simulation_settings: {fileID: 11400000, guid: a8058e1ec0daf924f90ae634eb392cf0, type: 2}
     com.unity.xr.management.loader_settings: {fileID: 11400000, guid: 579f5610c48ab034b92d0cf8bbf7d559, type: 2}

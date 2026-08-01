@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: c9b9f378349244dc4874c05574b3bec3
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Models/UI/Sphere Variant.prefab
+  uploadId: 949372

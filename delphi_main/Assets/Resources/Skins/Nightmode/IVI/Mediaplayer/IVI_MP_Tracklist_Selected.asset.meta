@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 490f95f1e2c689b49bf3101b7a77d92f
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Nightmode/IVI/Mediaplayer/IVI_MP_Tracklist_Selected.asset
+  uploadId: 949372

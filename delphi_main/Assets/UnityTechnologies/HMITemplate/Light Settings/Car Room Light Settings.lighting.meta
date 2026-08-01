@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: e1d88ef70a83b234686e014bae2c7089
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 4890085278179872738
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Light Settings/Car Room Light Settings.lighting
+  uploadId: 949372

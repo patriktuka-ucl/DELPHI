@@ -8,7 +8,6 @@ using Newtonsoft.Json.Linq;
 using UnityEngine;
 using Delphi.Simulation;
 using Delphi.Trial;
-using QuestionnaireToolkit.Scripts;
 
 namespace Delphi.Session
 {
@@ -49,15 +48,18 @@ namespace Delphi.Session
     /// changing both together.
     ///
     /// There is no separate Parking segment: the moment the drive ends, the
-    /// evaluation narration plays, the questionnaire appears, and the car is
-    /// instantly reset back to the start (CarDriver.ResetToStart) — all at
-    /// once, not a physical drive to a marker somewhere down the track. The
-    /// questionnaire fills the whole screen, so the reset is invisible to the
-    /// participant regardless of when it happens; that's also what avoids
-    /// needing the track to be long enough to physically reach a marker from
-    /// wherever a given drive happened to end. The segment advances the
-    /// instant the questionnaire is submitted — see EnterQuestionnaire /
-    /// TickQuestionnaire.
+    /// evaluation narration plays WHILE the car pulls over for real (see
+    /// CarDriver.RequestPullover — a computed, on-demand stopping point on
+    /// the existing driving line, not a hand-authored marker, so the route
+    /// never needs pre-timing to land the car anywhere specific). The
+    /// questionnaire itself only appears once the car has actually come to a
+    /// halt and the narration has finished — see EnterQuestionnaire /
+    /// TickQuestionnaire. Only the OUTGOING reset back to the start
+    /// (CarDriver.ResetToStart) is an instant teleport, done once the
+    /// questionnaire is submitted while its panel still fills the whole
+    /// screen — invisible for the same reason it always was, just moved to
+    /// the other side of the questionnaire. The segment advances the instant
+    /// the questionnaire is submitted.
     ///
     /// THE MEDITATION IS THE BASELINE. There is no separate stationary
     /// baseline phase: the physiological reference means are accumulated
@@ -74,7 +76,7 @@ namespace Delphi.Session
     /// not Inspector-configured, since they change every participant/session,
     /// not every build. groupId is derived from orderIndex, not typed.
     /// </summary>
-    public class SessionController : MonoBehaviour, IQuestionnaireOptimizationBridge
+    public class SessionController : MonoBehaviour
     {
         /// <summary>No Baseline member: the baseline is measured inside
         /// Meditation now, not in a phase of its own. No Parking member
@@ -84,7 +86,7 @@ namespace Delphi.Session
         public enum Phase
         {
             Idle, Intro, Meditation, ConditionIntro,
-            WaitingForOptimizer, WaitingForParameters, Washout, Measuring, AwaitingRating,
+            WaitingForOptimizer, WaitingForParameters, Washout, Trial, Measuring, AwaitingRating,
             Questionnaire, BreakOffer, FreePlay,
             Complete, EmergencyStop, Error
         }
@@ -264,17 +266,25 @@ namespace Delphi.Session
         /// </summary>
         public string groupId => orderIndex.ToString();
 
-        [Header("Baseline — measured DURING the meditation")]
-        [Tooltip("Length of the averaging window, in seconds. Every " +
-                 "physiological sample inside it is averaged into that " +
-                 "condition's reference mean.")]
-        [Min(1f)] public float baselineWindowSeconds = 10f;
-        [Tooltip("The window ENDS this many seconds before the meditation " +
-                 "track does, so the last moments of the track — where the " +
-                 "participant may already be anticipating the drive — stay " +
-                 "out of the reference. With a 2:05 track and the defaults " +
-                 "(10s window, 5s tail) the window is 1:50–2:00.")]
-        [Min(0f)] public float baselineWindowEndOffsetSeconds = 5f;
+        [Header("Meditation — three authored sections of ONE audio file: " +
+                "acclimatisation (just listening) → measurement (the " +
+                "baseline window) → fadeout (volume ramps to 0). The " +
+                "recording should be AT LEAST as long as the three added " +
+                "together — deliberately longer-than-needed is fine, " +
+                "anything past that point in the file is simply never " +
+                "reached, since the phase ends there regardless.")]
+        [Tooltip("Seconds at the start of the track where the participant " +
+                 "just listens — nothing is measured yet.")]
+        [Min(0f)] public float meditationAcclimatisationSeconds = 30f;
+        [Tooltip("Seconds immediately after acclimatisation during which " +
+                 "every physiological sample is averaged into this " +
+                 "condition's reference mean — this section IS the baseline " +
+                 "window.")]
+        [Min(1f)] public float meditationMeasurementSeconds = 60f;
+        [Tooltip("Seconds after the measurement window during which the " +
+                 "track's volume ramps linearly from full down to silent, " +
+                 "ending exactly as the meditation phase ends.")]
+        [Min(0f)] public float meditationFadeoutSeconds = 10f;
 
         [Header("Explore (FreeRoam) nudge")]
         [Tooltip("extra_exploreNudge plays automatically after this many " +
@@ -303,7 +313,7 @@ namespace Delphi.Session
         public ConditionTrialConfig implicitTrial = new();
         public ConditionTrialConfig explicitTrial = new();
 
-        [Header("BO Hub — everything that configures the optimizer")]
+        [Header("Physiological objective shaping")]
         [Tooltip("Shaping applied to every physiology channel's signed " +
                  "deviation before it goes to the optimizer (Physiology " +
                  "objective only — Questionnaire ignores this entirely).")]
@@ -315,38 +325,72 @@ namespace Delphi.Session
         [Tooltip("Per-channel literature SD + bad-direction. Auto-populated " +
                  "from the plugged-in DelphiManager's enabled channels.")]
         public List<ChannelNormalization> channelConfigs = new();
-        [Tooltip("The rating scale's own range — matches the 7-point Likert " +
-                 "items in the placeholder questionnaires. Sent to mobo.py " +
-                 "as-is (raw rating, not pre-normalized) so its own CSV log " +
-                 "shows the real rating instead of an abstract number. Higher " +
-                 "is treated as the better outcome.")]
-        public float questionnaireMin = 1f;
-        public float questionnaireMax = 7f;
-        [Tooltip("Seconds per iteration — one parameter set is active for " +
-                 "exactly this long before the next one is requested.")]
-        [Min(1f)] public float windowSeconds = 40f;
-        [Tooltip("Seconds discarded at the start of each window before " +
-                 "measurement begins. Must cover BOTH the parameter ramp " +
-                 "(Transition, right below) AND physiological lag (GSR ≈ 1–4s, " +
-                 "HR ≈ 5–10s) — too short and the window measures the tail of " +
-                 "the PREVIOUS parameter set.")]
-        [Min(0f)] public float washoutSeconds = 10f;
+        // Bounds for every questionnaire objective sent to mobo.py — sourced
+        // from the questionnaire itself rather than authored separately here,
+        // so they can't drift out of sync with what it actually produces.
+        // Sent to mobo.py as-is (raw rating, not pre-normalized) so its own
+        // CSV log shows the real rating instead of an abstract number.
+        // Higher is treated as the better outcome.
+        /// <summary>Always 1 — DelphiQuestion.response is always 1..steps,
+        /// universally, so there's nothing to author here.</summary>
+        public float questionnaireMin => 1f;
+        /// <summary>The largest `steps` across every question on
+        /// delphiQuestionnaire, so no question's legitimate answer range is
+        /// ever clamped by a bound sized for a different one. Falls back to 7
+        /// (the placeholder questionnaires' own default) if nothing is linked
+        /// yet.</summary>
+        public float questionnaireMax =>
+            delphiQuestionnaire != null && delphiQuestionnaire.questions != null && delphiQuestionnaire.questions.Count > 0
+                ? delphiQuestionnaire.questions.Max(q => q.steps)
+                : 7f;
         [Tooltip("When the optimizer hands over a new parameter set, ramp " +
                  "LINEARLY to it over this many seconds instead of snapping — " +
-                 "an instant jolt is itself a startle stimulus. Clamped to " +
-                 "Washout above so measurement never starts mid-ramp.")]
+                 "an instant jolt is itself a startle stimulus.")]
         [Min(0f)] public float transitionSeconds = 3f;
+        [Tooltip("Seconds AFTER the ramp completes where nothing changes — the " +
+                 "participant just experiences the new parameter set — before " +
+                 "measurement begins. Covers the physiological-lag buffer (GSR " +
+                 "≈ 1–4s, HR ≈ 5–10s) so the window doesn't measure a body " +
+                 "still catching up to the new parameter set.")]
+        [Min(0f)] public float idleSeconds = 7f;
+        [Tooltip("Seconds actually averaged into the objective, once " +
+                 "transition + idle are done. Implicit only — Explicit has " +
+                 "no fixed measurement phase (AwaitingRating ends whenever the " +
+                 "participant submits).")]
+        [Min(1f)] public float measurementSeconds = 30f;
+        [Tooltip("Explicit only. How long the participant drives/experiences " +
+                 "the current parameter set (Phase.Trial) after washout, " +
+                 "before the simulator freezes and the rating questionnaire " +
+                 "appears. Unlike Implicit's measurementSeconds this isn't " +
+                 "averaged into anything — it's purely how long they get to " +
+                 "feel the parameters before being asked to rate them.")]
+        [Min(1f)] public float explicitTrialSeconds = 20f;
+        /// <summary>transitionSeconds + idleSeconds — derived, not authored
+        /// directly. What Explicit's per-iteration washout actually is; for
+        /// Implicit it's the discarded lead-in before measurementSeconds
+        /// starts. (Not drawn by the default Inspector — it's a computed
+        /// property, not a serialized field; the custom editor's timing
+        /// panel shows it as a readout instead.)</summary>
+        public float washoutSeconds => transitionSeconds + idleSeconds;
+        /// <summary>washoutSeconds + measurementSeconds — derived. Seconds
+        /// one parameter set is active for before the next is requested,
+        /// Implicit only.</summary>
+        public float windowSeconds => washoutSeconds + measurementSeconds;
         [Tooltip("Empty = auto: the project-local venv at BOPythonEnv " +
                  "(Scripts/python.exe on Windows, bin/python3 elsewhere).")]
         public string pythonPath = "";
         public int seed = 3;
 
-        [Header("BO Hub — model-fit cost (every iteration PAST sampling)")]
+        // Drawn inside the custom editor's "BO configuration" foldout, which
+        // supplies its own "Model-fit cost" section label — no [Header] here,
+        // that would double up (PropertyField renders a field's own
+        // decorator attributes even when called explicitly, so this used to
+        // print its heading a second time right above the foldout's own).
         [Tooltip("How the GP model fit + acquisition optimization is allowed " +
                  "to cost, in real wall-clock seconds sitting between two " +
                  "iterations with a participant in the car. These three " +
                  "numbers (below) are what actually control that cost — " +
-                 "problem size (6 parameters, a couple of objectives) is tiny, " +
+                 "problem size (a handful of driving parameters, a couple of objectives) is tiny, " +
                  "so cutting them down loses very little optimization quality " +
                  "for a large drop in wait time. Increase them later, offline, " +
                  "if you want to study convergence quality instead of run one " +
@@ -362,11 +406,20 @@ namespace Delphi.Session
                  "(dead process, Python exception that didn't bring the " +
                  "process down) needs a ceiling. 0 = no timeout.")]
         [Min(0f)] public float optimizerResponseTimeoutSeconds = 180f;
+        [Tooltip("PLANNING ESTIMATE ONLY — how long the BO hub is expected to " +
+                 "actually take between iterations, for the timing panel/" +
+                 "timeline's wall-clock math. NOT a ceiling: unlike " +
+                 "optimizerResponseTimeoutSeconds above (which the session " +
+                 "waits up to before failing), this number doesn't gate " +
+                 "anything — it's purely descriptive, so make a realistic " +
+                 "guess rather than a safe-but-alarming worst case.")]
+        [Min(0f)] public float boProcessingEstimateSeconds = 2f;
 
         /// <summary>Seconds of the window actually averaged into the
-        /// objective, after washout — computed, not separately configured.</summary>
-        public float MeasureSeconds => Mathf.Max(0f, windowSeconds - EffectiveWashoutSeconds);
-        private float EffectiveWashoutSeconds => Mathf.Min(washoutSeconds, windowSeconds);
+        /// objective — directly authored now (measurementSeconds); kept as
+        /// its own property since callers elsewhere already read
+        /// MeasureSeconds by this name.</summary>
+        public float MeasureSeconds => measurementSeconds;
 
         // ── Runtime state (read by ExperimentUI / editor) ───────────────
         public enum OptimizerStatus { NotStarted, Starting, Connected, Disconnected }
@@ -384,7 +437,7 @@ namespace Delphi.Session
         /// <summary>True while a condition's baseline/iteration loop is
         /// actively running.</summary>
         public bool IsRunningCondition => CurrentPhase is Phase.WaitingForOptimizer
-            or Phase.WaitingForParameters or Phase.Washout or Phase.Measuring or Phase.AwaitingRating;
+            or Phase.WaitingForParameters or Phase.Washout or Phase.Trial or Phase.Measuring or Phase.AwaitingRating;
 
         public int Iteration { get; private set; }
         public int TotalIterations => _activeConfig?.iterations ?? 0;
@@ -467,6 +520,7 @@ namespace Delphi.Session
         private ObjectiveSource _objectiveSource;
         private readonly Dictionary<Channel, float> _baseline = new();
         private double _baselineWindowStart, _baselineWindowEnd; // absolute DelphiClock times inside the meditation
+        private double _fadeoutStart; // absolute DelphiClock time the meditation volume ramp begins
         private bool _baselineCaptured;
 
         // ── Questionnaire state (Phase.Questionnaire) ───────────────────
@@ -492,12 +546,6 @@ namespace Delphi.Session
         private double _lastFreePlayActivity; // last slider move, for the idle nudge
         private int _autoNudgesPlayed;
 
-        private static readonly string[] ParameterKeys =
-        {
-            "accelerationJerk", "brakingJerk", "followDistance",
-            "corneringSpeed"
-        };
-
         private void Awake()
         {
             if (manager == null)    manager    = FindAnyObjectByType<DelphiManager>();
@@ -505,6 +553,38 @@ namespace Delphi.Session
             if (recorder == null)   recorder   = FindAnyObjectByType<SessionRecorder>();
             if (narration == null)  narration  = FindAnyObjectByType<NarrationController>();
             if (motionCues == null) motionCues = FindAnyObjectByType<Delphi.Motion.CarMotionCues>();
+
+            // Two DelphiQuestionnaire instances live in every scene — the
+            // per-iteration rating and the post-condition evaluation — so a
+            // bare FindAnyObjectByType can't tell them apart. Disambiguated by
+            // the scene's own naming convention under the "Questionnaires"
+            // parent ("Questionnaire — Per Trial (...)" /
+            // "Questionnaire — Condition Evaluation"), which is the only
+            // signal that exists today — a wrong guess here would silently
+            // attribute a participant's answers to the wrong questionnaire,
+            // so this only auto-assigns on an unambiguous name match, never a
+            // guess. VrQuestionnairePanel lives on the SAME GameObject as its
+            // DelphiQuestionnaire in every authored scene, so once the
+            // questionnaire is identified the panel is just a GetComponent.
+            if (delphiQuestionnaire == null || conditionEvaluation == null)
+            {
+                foreach (var dq in FindObjectsByType<DelphiQuestionnaire>(FindObjectsInactive.Exclude))
+                {
+                    string n = dq.gameObject.name;
+                    if (conditionEvaluation == null && n.Contains("Condition Evaluation"))
+                    {
+                        conditionEvaluation = dq;
+                        if (conditionEvaluationPanel == null)
+                            conditionEvaluationPanel = dq.GetComponent<VR.VrQuestionnairePanel>();
+                    }
+                    else if (delphiQuestionnaire == null && n.Contains("Per Trial"))
+                    {
+                        delphiQuestionnaire = dq;
+                        if (delphiQuestionnairePanel == null)
+                            delphiQuestionnairePanel = dq.GetComponent<VR.VrQuestionnairePanel>();
+                    }
+                }
+            }
 
             // Phase.Questionnaire now advances from the condition-evaluation
             // panel's own submit (see OnConditionEvaluationSubmitted), so
@@ -723,17 +803,10 @@ namespace Delphi.Session
             }
 
             float v = Mathf.Clamp01(value);
-            foreach (string key in StyleParameterKeys) SetParam(carDriver.parameters, key, v);
+            foreach (var info in DrivingParameterRegistry.All) info.Set(carDriver.parameters, v);
             _lastFreePlayActivity = DelphiClock.Now;
             LogFreePlayRow();
         }
-
-        /// <summary>The axes a single style scalar moves. Public so the
-        /// participant panel reads the style back out of the car from the same
-        /// list it wrote in with, instead of keeping its own copy that can
-        /// drift once a fifth parameter is added.</summary>
-        public static readonly string[] StyleParameterKeys =
-            { "accelerationJerk", "brakingJerk", "followDistance", "corneringSpeed" };
 
         /// <summary>The car's current position on the defensive–aggressive
         /// axis: the mean of the style parameters. While only SetFreePlayStyle
@@ -747,7 +820,7 @@ namespace Delphi.Session
             {
                 if (carDriver == null) return 0.5f;
                 var p = carDriver.parameters;
-                return (p.accelerationJerk + p.brakingJerk + p.followDistance + p.corneringSpeed) * 0.25f;
+                return DrivingParameterRegistry.All.Average(info => info.Get(p));
             }
         }
 
@@ -847,7 +920,7 @@ namespace Delphi.Session
             _freePlayStart = DelphiClock.Now;
             _freePlayLog = new StreamWriter(Path.Combine(dir, "freeplay_log.csv"));
             var header = new StringBuilder("t_s");
-            foreach (var key in ParameterKeys) header.Append(',').Append(key);
+            foreach (var key in DrivingParameterRegistry.Keys) header.Append(',').Append(key);
             _freePlayLog.WriteLine(header.ToString());
             _freePlayLog.Flush();
             LogFreePlayRow(); // capture the starting values too, not just changes
@@ -859,9 +932,8 @@ namespace Delphi.Session
             var p = carDriver.parameters;
             var row = new StringBuilder();
             row.Append(F(DelphiClock.Now - _freePlayStart));
-            foreach (float v in new[] { p.accelerationJerk, p.brakingJerk, p.followDistance,
-                                        p.corneringSpeed })
-                row.Append(',').Append(F(v));
+            foreach (var info in DrivingParameterRegistry.All)
+                row.Append(',').Append(F(info.Get(p)));
             _freePlayLog.WriteLine(row.ToString());
             _freePlayLog.Flush();
         }
@@ -879,6 +951,14 @@ namespace Delphi.Session
         /// optimizer connection and — combined with the condition intro not
         /// setting CurrentPhase until its narration finished — let a second
         /// Resume click during that window re-enter a second time).
+        ///
+        /// One exception to "everything else untouched": if a baseline or
+        /// iteration measurement window is open (_acc != null), it is
+        /// detached from DelphiCore for the duration of the stop and
+        /// reattached on Resume — the car is halted and the researcher may be
+        /// talking to the participant, so samples taken during the pause
+        /// would silently contaminate that window's mean/variance. CSV/video
+        /// recording is NOT paused — that continues exactly as before.
         ///
         /// The stop line (extra_emergencyStop) cuts off whatever was being
         /// said, deliberately: it has to be the thing the participant hears.</summary>
@@ -898,6 +978,10 @@ namespace Delphi.Session
             _phaseEnd = 0;
             IsAwaitingResearcher = true;
             StatusLine = $"EMERGENCY STOP (was {_interruptedPhase})";
+            // Detach (not discard) any open measurement window — _acc keeps
+            // whatever was accumulated so far and picks back up on Resume,
+            // but no samples land in it while the session is paused.
+            if (manager != null && manager.Core != null) manager.Core.Accumulator = null;
             // Bookmark whatever was mid-sentence BEFORE talking over it — the
             // phase timer resumes in place, so the rest of that line still has
             // to be said when we come back (see NarrationController.Suspend/
@@ -905,7 +989,7 @@ namespace Delphi.Session
             narration?.SuspendSpeaking();
             narration?.Play(NarrationController.Line.EmergencyStop);
             Debug.LogWarning($"[Session] Emergency stop during {_interruptedPhase} — paused in place; " +
-                              "optimizer connection and trial state untouched.");
+                              "optimizer connection and trial state untouched; measurement window (if any) detached.");
         }
 
         /// <summary>Come back from an emergency stop (continues exactly where
@@ -924,8 +1008,22 @@ namespace Delphi.Session
                 // actually resuming (ResumeDriving is skipped below in this
                 // exact case).
                 if (_interruptedPhase == Phase.AwaitingRating) motionCues?.FreezeInPlace();
-                if (!_wasParkedBeforeStop) { carDriver?.ResumeDriving(); motionCues?.Unfreeze(); }
+                if (!_wasParkedBeforeStop)
+                {
+                    carDriver?.ResumeDriving(); motionCues?.Unfreeze();
+                    // ResumeDriving() clears any in-flight pullover heading too
+                    // (see CarDriver.ResumeDriving) — if the stop interrupted
+                    // the questionnaire's real-time pullover mid-manoeuvre,
+                    // restart it, otherwise the car would just resume cruising
+                    // and never reach IsParked, silently waiting out
+                    // TickQuestionnaire's safety ceiling instead.
+                    if (_interruptedPhase == Phase.Questionnaire) carDriver?.RequestPullover();
+                }
                 if (_pausedRemaining >= 0) _phaseEnd = DelphiClock.Now + _pausedRemaining;
+                // Reattach whatever measurement window was open before the
+                // stop (no-op if _acc is null, i.e. none was open) — see the
+                // detach in EmergencyStop().
+                if (manager != null && manager.Core != null) manager.Core.Accumulator = _acc;
                 // The idle clock is wall-clock, so a long stop mid-roam would
                 // otherwise trip the nudge the instant we un-pause.
                 if (_interruptedPhase == Phase.FreePlay) _lastFreePlayActivity = DelphiClock.Now;
@@ -1242,7 +1340,7 @@ namespace Delphi.Session
         {
             if (carDriver == null) return;
 
-            foreach (var key in ParameterKeys)
+            foreach (var key in DrivingParameterRegistry.Keys)
                 SetParam(carDriver.parameters, key, NeutralParameterValue);
 
             // Drop any ramp still in flight from the previous condition, or
@@ -1281,20 +1379,39 @@ namespace Delphi.Session
             _questionnaireSlot = slot;
 
             narration?.Play(TrialEvalLine(slot));
-            carDriver?.ResetToStart();
-            motionCues?.ReturnToNeutral(returnToNeutralSeconds);
+            // Pulls over FOR REAL while the evaluation prompt plays — smooth
+            // in-lane braking (see CarDriver.RequestPullover), felt through
+            // the seat like any other deceleration. The questionnaire itself
+            // only appears once the car actually halts (see TickQuestionnaire
+            // below), not simply once the narration clip's own length has
+            // elapsed — _phaseEnd here is a safety ceiling only, in case
+            // something stops the car from ever reporting parked.
+            carDriver?.RequestPullover();
 
-            _phaseEnd = DelphiClock.Now + NarrationSeconds(TrialEvalLine(slot));
-            StatusLine = "Playing evaluation prompt…";
+            _phaseEnd = DelphiClock.Now + Mathf.Max(NarrationSeconds(TrialEvalLine(slot)), 5f) + 60f;
+            StatusLine = "Pulling over for the evaluation…";
         }
 
         private void TickQuestionnaire()
         {
             if (!_questionnaireUiShown)
             {
-                if (_phaseEnd > 0 && DelphiClock.Now < _phaseEnd) return;
+                bool parked = carDriver == null || carDriver.IsParked;
+                bool doneSpeaking = narration == null || !narration.IsSpeaking;
+                bool safetyCeilingHit = _phaseEnd > 0 && DelphiClock.Now >= _phaseEnd;
+                if (!(parked && doneSpeaking) && !safetyCeilingHit) return;
+                if (safetyCeilingHit && !parked)
+                    Debug.LogWarning("[Trial] Questionnaire safety ceiling reached before the car finished " +
+                                     "pulling over — showing the evaluation panel anyway.", this);
+
                 _questionnaireUiShown = true;
                 _phaseEnd = 0;
+                // The car has already come to rest under its own real braking
+                // curve, so the seat is already at (or very near) neutral —
+                // this just settles the last of it rather than fighting a
+                // still-live deceleration cue, which an immediate call here
+                // used to do back when this reset was an instant teleport.
+                motionCues?.ReturnToNeutral(returnToNeutralSeconds);
 
                 if (conditionEvaluationPanel != null && conditionEvaluation != null)
                 {
@@ -1316,7 +1433,16 @@ namespace Delphi.Session
                 return;
             }
 
-            if (_questionnaireConfirmed) AdvanceToNextSegment();
+            if (_questionnaireConfirmed)
+            {
+                // NOW teleport back to the start for whatever comes next — the
+                // panel still fills the whole screen at this point, so this
+                // reset is exactly as invisible as the old immediate one was,
+                // just moved to the OUTGOING side of the questionnaire instead
+                // of the incoming one.
+                carDriver?.ResetToStart();
+                AdvanceToNextSegment();
+            }
         }
 
         /// <summary>Records the post-condition evaluation and lets the session
@@ -1382,18 +1508,21 @@ namespace Delphi.Session
 
         // ── Meditation = baseline ───────────────────────────────────────
         /// <summary>The meditation, which doubles as this condition's
-        /// physiological baseline. The track plays continuously start to
-        /// finish; a window near its end — baselineWindowSeconds long, ending
-        /// baselineWindowEndOffsetSeconds before the track does — is averaged
+        /// physiological baseline. One audio file, three authored sections:
+        /// meditationAcclimatisationSeconds of just listening, then
+        /// meditationMeasurementSeconds during which every sample is averaged
         /// into the reference means the whole Implicit objective is computed
-        /// against.
+        /// against, then meditationFadeoutSeconds during which the track's
+        /// volume ramps to silence. The phase ends there — the recording may
+        /// run longer than the three combined, deliberately, and whatever's
+        /// past that point is simply never reached.
         ///
         /// Measuring here rather than in a separate silent phase is the point:
         /// the participant is already settled and the acoustic environment is
         /// identical every time, so the reference isn't contaminated by the
-        /// transition into it. The tail after the window exists so the last
-        /// moments — where they may already be bracing for the drive — stay
-        /// out of the average.
+        /// transition into it. The fadeout after the window exists so the
+        /// last moments — where they may already be bracing for the drive —
+        /// stay out of the average.
         ///
         /// The phase length is the CLIP's length, so the window follows the
         /// actual recording rather than a typed number that can drift away
@@ -1417,8 +1546,9 @@ namespace Delphi.Session
             CurrentPhase = Phase.Meditation;
             narration?.Play(NarrationController.Line.Meditation);
 
-            float duration = NarrationSeconds(NarrationController.Line.Meditation);
-            StartTimer(duration, "Meditation");
+            float clipLength = NarrationSeconds(NarrationController.Line.Meditation);
+            float needed = meditationAcclimatisationSeconds + meditationMeasurementSeconds + meditationFadeoutSeconds;
+            float duration = Mathf.Min(clipLength, needed);
 
             // Anything left over from a previous condition must go: a stale
             // reference mean silently applied to the next condition is the
@@ -1428,28 +1558,31 @@ namespace Delphi.Session
             _acc = null;
             if (manager != null && manager.Core != null) manager.Core.Accumulator = null;
 
-            float needed = baselineWindowSeconds + baselineWindowEndOffsetSeconds;
-            if (duration < needed)
+            if (needed > clipLength)
             {
-                Debug.LogWarning($"[Trial] The meditation track is {duration:0.0}s but the baseline needs " +
-                                 $"{needed:0.0}s ({baselineWindowSeconds:0}s window + {baselineWindowEndOffsetSeconds:0}s tail). " +
-                                 "Measuring over what's available instead — the reference means will be based on " +
-                                 "fewer samples than intended. Check the clip is the full-length recording, and " +
-                                 "that Mute Test is off.");
-                _baselineWindowEnd = _phaseEnd - Mathf.Min(baselineWindowEndOffsetSeconds, duration * 0.5f);
-                _baselineWindowStart = DelphiClock.Now;
-            }
-            else
-            {
-                _baselineWindowEnd = _phaseEnd - baselineWindowEndOffsetSeconds;
-                _baselineWindowStart = _baselineWindowEnd - baselineWindowSeconds;
+                Debug.LogWarning($"[Trial] The meditation track is {clipLength:0.0}s but the authored sections " +
+                                 $"need {needed:0.0}s ({meditationAcclimatisationSeconds:0}s acclimatisation + " +
+                                 $"{meditationMeasurementSeconds:0}s measurement + {meditationFadeoutSeconds:0}s " +
+                                 "fadeout). Ending the phase at the clip's own length instead — the reference " +
+                                 "means will be based on fewer samples than intended, and the fadeout may be cut " +
+                                 "short. Use a longer recording, or shorten the authored sections.");
             }
 
+            StartTimer(duration, "Meditation");
+
             double trackStart = _phaseEnd - duration;
-            StatusLine = $"Meditation ({Clock(duration)}) — baseline window opens in " +
-                         $"{_baselineWindowStart - DelphiClock.Now:0}s";
-            Debug.Log($"[Trial] Meditation started ({Clock(duration)}). Baseline window: " +
-                      $"{Clock(_baselineWindowStart - trackStart)}–{Clock(_baselineWindowEnd - trackStart)} into the track.");
+            float acclimatisation = Mathf.Min(meditationAcclimatisationSeconds, duration);
+            float measurementEnd = Mathf.Min(acclimatisation + meditationMeasurementSeconds, duration);
+            _baselineWindowStart = trackStart + acclimatisation;
+            _baselineWindowEnd = trackStart + measurementEnd;
+            _fadeoutStart = trackStart + Mathf.Max(measurementEnd, duration - meditationFadeoutSeconds);
+
+            StatusLine = $"Meditation ({Clock(duration)}) — acclimatisation {Clock(meditationAcclimatisationSeconds)}, " +
+                         $"then measuring {Clock(meditationMeasurementSeconds)}";
+            Debug.Log($"[Trial] Meditation started ({Clock(duration)}). Acclimatisation " +
+                      $"{Clock(meditationAcclimatisationSeconds)} → measurement window " +
+                      $"{Clock(_baselineWindowStart - trackStart)}–{Clock(_baselineWindowEnd - trackStart)} → " +
+                      $"fadeout from {Clock(_fadeoutStart - trackStart)}.");
         }
 
         private void TickMeditation()
@@ -1466,6 +1599,16 @@ namespace Delphi.Session
 
             if (!_baselineCaptured && _acc != null && now >= _baselineWindowEnd)
                 CaptureBaseline();
+
+            // Fade the track to silence over meditationFadeoutSeconds, ending
+            // exactly as the phase ends — not left to whatever the clip's own
+            // mix happens to taper to past the authored sections.
+            if (narration != null && narration.source != null &&
+                meditationFadeoutSeconds > 0f && now >= _fadeoutStart)
+            {
+                float t = Mathf.Clamp01((float)((now - _fadeoutStart) / meditationFadeoutSeconds));
+                narration.source.volume = 1f - t;
+            }
 
             if (_phaseEnd > 0 && now >= _phaseEnd)
             {
@@ -1586,6 +1729,7 @@ namespace Delphi.Session
                 case Phase.WaitingForOptimizer:    TickWaitingForOptimizer(); break;
                 case Phase.WaitingForParameters:
                 case Phase.Washout:
+                case Phase.Trial:
                 case Phase.Measuring:
                 case Phase.AwaitingRating:         TickIterationLoop(); break;
             }
@@ -1764,18 +1908,16 @@ namespace Delphi.Session
             {
                 if (_objectiveSource == ObjectiveSource.Questionnaire)
                 {
-                    // No windowed mean to gather — a rating is one discrete
-                    // value, not a sampled signal. Park (no jerk on the seat
-                    // either way) and wait for the participant to submit;
-                    // RequestNextIteration() (the bridge callback) is what
-                    // ends this phase, not a timer.
-                    CurrentPhase = Phase.AwaitingRating;
-                    StatusLine = $"Iteration {Iteration}/{TotalIterations} — parked, awaiting rating";
+                    // Explicit: the participant drives/experiences the
+                    // current parameter set for explicitTrialSeconds before
+                    // being asked to rate it — same shape as Implicit's
+                    // Washout->Measuring step, just without a windowed mean
+                    // to gather (see the Phase.Trial branch below for where
+                    // that timer actually ends).
                     _measureStart = DelphiClock.Now;
-                    _pendingQuestionnaireValues.Clear();
-                    carDriver?.FreezeInPlace(); // instant halt, not a drive to a (possibly distant) Park marker
-                    motionCues?.FreezeInPlace(); // seat holds real forces exactly as they were, not neutralized
-                    ShowRatingPanel();
+                    _phaseEnd = _measureStart + explicitTrialSeconds;
+                    CurrentPhase = Phase.Trial;
+                    StatusLine = $"Iteration {Iteration}/{TotalIterations} — trial";
                 }
                 else
                 {
@@ -1786,6 +1928,20 @@ namespace Delphi.Session
                     CurrentPhase = Phase.Measuring;
                     StatusLine = $"Iteration {Iteration}/{TotalIterations} — measuring";
                 }
+            }
+            else if (CurrentPhase == Phase.Trial && DelphiClock.Now >= _phaseEnd)
+            {
+                // No windowed mean to gather — a rating is one discrete
+                // value, not a sampled signal. Park (no jerk on the seat
+                // either way) and wait for the participant to submit;
+                // RequestNextIteration() (the bridge callback) is what ends
+                // this phase, not a timer.
+                CurrentPhase = Phase.AwaitingRating;
+                StatusLine = $"Iteration {Iteration}/{TotalIterations} — parked, awaiting rating";
+                _pendingQuestionnaireValues.Clear();
+                carDriver?.FreezeInPlace(); // instant halt, not a drive to a (possibly distant) Park marker
+                motionCues?.FreezeInPlace(); // seat holds real forces exactly as they were, not neutralized
+                ShowRatingPanel();
             }
             else if (CurrentPhase == Phase.Measuring && DelphiClock.Now >= _phaseEnd)
             {
@@ -1823,7 +1979,7 @@ namespace Delphi.Session
                         carDriver?.ResumeDriving();
                         motionCues?.Unfreeze();
                         CurrentPhase = Phase.Washout;
-                        _phaseEnd = DelphiClock.Now + EffectiveWashoutSeconds;
+                        _phaseEnd = DelphiClock.Now + washoutSeconds;
                         StatusLine = $"Iteration {Iteration}/{TotalIterations} — washout";
                         break;
 
@@ -1849,22 +2005,16 @@ namespace Delphi.Session
         // means the axis provably has zero effect on the car. A disabled
         // axis is EXCLUDED from the search space entirely, not sent as a
         // dimension the optimizer wastes budget exploring for no signal.
-        private bool IsParamOn(string key) => key switch
-        {
-            "accelerationJerk"    => carDriver.parameters.accelerationJerkOn,
-            "brakingJerk"         => carDriver.parameters.brakingJerkOn,
-            "followDistance"      => carDriver.parameters.followDistanceOn,
-            "corneringSpeed"      => carDriver.parameters.corneringSpeedOn,
-            _                     => true
-        };
+        private bool IsParamOn(string key) =>
+            DrivingParameterRegistry.ByKey(key)?.IsOn(carDriver.parameters) ?? true;
 
         // ── Optimizer messages ──────────────────────────────────────────
         private bool SendInit()
         {
-            _activeParamKeys = ParameterKeys.Where(IsParamOn).ToList();
+            _activeParamKeys = DrivingParameterRegistry.Keys.Where(IsParamOn).ToList();
             if (_activeParamKeys.Count == 0)
             {
-                Fail("All six driving parameters are disabled on CarDriver — nothing for the optimizer to search over.");
+                Fail($"All {DrivingParameterRegistry.All.Length} driving parameters are disabled on CarDriver — nothing for the optimizer to search over.");
                 return false;
             }
 
@@ -1943,7 +2093,7 @@ namespace Delphi.Session
             };
             _bo.Send(init);
 
-            var excluded = ParameterKeys.Except(_activeParamKeys).ToList();
+            var excluded = DrivingParameterRegistry.Keys.Except(_activeParamKeys).ToList();
             Debug.Log($"[Trial] Init sent: {_activeParamKeys.Count} parameters " +
                       $"({string.Join(", ", _activeParamKeys)})" +
                       (excluded.Count > 0 ? $" — excluded (disabled on CarDriver): {string.Join(", ", excluded)}" : "") +
@@ -1961,7 +2111,7 @@ namespace Delphi.Session
             {
                 // Land the values now and cancel any ramp — the car is parked,
                 // so it pulls away already ON the set being evaluated.
-                foreach (var key in ParameterKeys)
+                foreach (var key in DrivingParameterRegistry.Keys)
                     SetParam(p, key, Get(values, key, GetParam(p, key)));
                 _transFrom = null;
                 _transTo = null;
@@ -1971,7 +2121,7 @@ namespace Delphi.Session
             {
                 _transFrom = new Dictionary<string, float>();
                 _transTo = new Dictionary<string, float>();
-                foreach (var key in ParameterKeys)
+                foreach (var key in DrivingParameterRegistry.Keys)
                 {
                     float current = GetParam(p, key);
                     _transFrom[key] = current;
@@ -1979,11 +2129,12 @@ namespace Delphi.Session
                 }
                 _transStart = DelphiClock.Now;
 
-                _transDuration = Mathf.Clamp(transitionSeconds, 0f, EffectiveWashoutSeconds);
-                if (transitionSeconds > EffectiveWashoutSeconds)
-                    Debug.LogWarning($"[Trial] transitionSeconds ({transitionSeconds:0.#}s) exceeds the washout " +
-                                     $"({EffectiveWashoutSeconds:0.#}s) — clamped to {_transDuration:0.#}s so measurement never " +
-                                     "starts mid-ramp.");
+                // washoutSeconds is now transitionSeconds + idleSeconds by
+                // construction, so the ramp can never run past the washout —
+                // no clamp/warning needed any more (used to guard against
+                // transitionSeconds exceeding an independently-authored
+                // washoutSeconds, which can no longer happen).
+                _transDuration = transitionSeconds;
             }
 
             _lastParams = new Dictionary<string, float>();
@@ -2001,30 +2152,16 @@ namespace Delphi.Session
                 ? Mathf.Clamp01((float)((DelphiClock.Now - _transStart) / _transDuration))
                 : 1f;
             var p = carDriver.parameters;
-            foreach (var key in ParameterKeys)
+            foreach (var key in DrivingParameterRegistry.Keys)
                 SetParam(p, key, Mathf.Lerp(_transFrom[key], _transTo[key], t));
             if (t >= 1f) _transTo = null;
         }
 
-        private static float GetParam(DrivingParameters p, string key) => key switch
-        {
-            "accelerationJerk"    => p.accelerationJerk,
-            "brakingJerk"         => p.brakingJerk,
-            "followDistance"      => p.followDistance,
-            "corneringSpeed"      => p.corneringSpeed,
-            _                     => 0f
-        };
+        private static float GetParam(DrivingParameters p, string key) =>
+            DrivingParameterRegistry.ByKey(key)?.Get(p) ?? 0f;
 
-        private static void SetParam(DrivingParameters p, string key, float v)
-        {
-            switch (key)
-            {
-                case "accelerationJerk":    p.accelerationJerk    = v; break;
-                case "brakingJerk":         p.brakingJerk         = v; break;
-                case "followDistance":      p.followDistance      = v; break;
-                case "corneringSpeed":      p.corneringSpeed      = v; break;
-            }
-        }
+        private static void SetParam(DrivingParameters p, string key, float v) =>
+            DrivingParameterRegistry.ByKey(key)?.Set(p, v);
 
         private static string FormatDict(Dictionary<string, float> d) =>
             string.Join(", ", d.Select(kv => $"{kv.Key}={kv.Value:F3}"));
@@ -2105,22 +2242,6 @@ namespace Delphi.Session
             WriteTrialLogRow(logCells);
         }
 
-        // ── IQuestionnaireOptimizationBridge (per-iteration rating) ─────
-        // This class IS the bridge — it already owns _objectiveChannels/
-        // _questionnaireKeys and the whole state machine, so a separate
-        // adapter would just be a second state machine to keep in sync.
-        bool IQuestionnaireOptimizationBridge.UsesExternalIterationSignal => true;
-        bool IQuestionnaireOptimizationBridge.EnablePriorRatingHints => false;
-        float IQuestionnaireOptimizationBridge.PriorRatingHintAlpha => 0f;
-        string IQuestionnaireOptimizationBridge.UserId => userId;
-        string IQuestionnaireOptimizationBridge.ConditionId => conditionId;
-        string IQuestionnaireOptimizationBridge.GroupId => groupId;
-
-        // StartConditionTrial() already ran mobo.py's real init before the
-        // car ever started driving toward this rating — nothing left to
-        // start here.
-        void IQuestionnaireOptimizationBridge.OptimizationStart() { }
-
         /// <summary>Shows the per-trial rating panel and arms its submit.
         ///
         /// The handler is re-attached each time rather than once at startup so
@@ -2164,10 +2285,10 @@ namespace Delphi.Session
             Debug.Log($"[Trial] Rating submitted for iteration {Iteration}: " +
                       string.Join(", ", _pendingQuestionnaireValues.Select(kv => $"{kv.Key}={kv.Value:0}")), this);
 
-            ((IQuestionnaireOptimizationBridge)this).RequestNextIteration();
+            RequestNextIteration();
         }
 
-        void IQuestionnaireOptimizationBridge.RequestNextIteration()
+        private void RequestNextIteration()
         {
             if (CurrentPhase != Phase.AwaitingRating) return;
             SubmitQuestionnaireObjectives();
@@ -2175,36 +2296,6 @@ namespace Delphi.Session
             motionCues?.Unfreeze();
             EnterWaitingForParameters($"Iteration {Iteration}/{TotalIterations} — submitted, waiting");
         }
-
-        void IQuestionnaireOptimizationBridge.SubmitQuestionnaireObjectiveValue(string headerName, string rawValue, string sourceName)
-        {
-            if (string.IsNullOrEmpty(headerName)) return;
-
-            if (!float.TryParse(rawValue, NumberStyles.Float, CultureInfo.InvariantCulture, out float v))
-            {
-                Debug.LogWarning($"[Trial] Could not parse questionnaire value '{rawValue}' for '{headerName}' (from '{sourceName}').");
-                return;
-            }
-
-            _pendingQuestionnaireValues[headerName] = v;
-        }
-
-        // Optional prior-rating-hint UX (pre-filling a slider with the last
-        // rating) — not wired yet, safe no-ops.
-        void IQuestionnaireOptimizationBridge.SetPriorSliderRatingHint(string questionKey, float sliderValue) { }
-        bool IQuestionnaireOptimizationBridge.TryGetPriorSliderRatingHint(string questionKey, out float sliderValue)
-        {
-            sliderValue = 0f;
-            return false;
-        }
-        void IQuestionnaireOptimizationBridge.RemovePriorSliderRatingHint(string questionKey) { }
-        void IQuestionnaireOptimizationBridge.SetPriorLinearScaleRatingHint(string questionKey, string answerValue) { }
-        bool IQuestionnaireOptimizationBridge.TryGetPriorLinearScaleRatingHint(string questionKey, out string answerValue)
-        {
-            answerValue = null;
-            return false;
-        }
-        void IQuestionnaireOptimizationBridge.RemovePriorLinearScaleRatingHint(string questionKey) { }
 
         // ── Per-channel normalization config ────────────────────────────
         public ChannelNormalization ConfigFor(Channel ch)
@@ -2248,7 +2339,7 @@ namespace Delphi.Session
             _trialLog = new StreamWriter(Path.Combine(dir, "trial_log.csv"));
 
             var header = new StringBuilder("iteration,t_measure_start_s,t_measure_end_s");
-            foreach (var key in ParameterKeys) header.Append(',').Append(key);
+            foreach (var key in DrivingParameterRegistry.Keys) header.Append(',').Append(key);
             if (_objectiveSource == ObjectiveSource.Questionnaire)
                 // raw = the participant's submitted rating, native scale
                 // (questionnaireMin..questionnaireMax) — sent to mobo.py as-is.
@@ -2274,9 +2365,8 @@ namespace Delphi.Session
             row.Append(Iteration).Append(',');
             row.Append(F(_measureStart - _trialStart)).Append(',');
             row.Append(F(DelphiClock.Now - _trialStart));
-            foreach (float v in new[] { p.accelerationJerk, p.brakingJerk, p.followDistance,
-                                        p.corneringSpeed })
-                row.Append(',').Append(F(v));
+            foreach (var info in DrivingParameterRegistry.All)
+                row.Append(',').Append(F(info.Get(p)));
             foreach (var c in objectiveCells) row.Append(',').Append(c);
             row.Append(',').Append(float.IsNaN(LastCoverage) ? "NaN" : F(LastCoverage));
             _trialLog.WriteLine(row.ToString());
@@ -2332,13 +2422,16 @@ namespace Delphi.Session
                     endReason = endReason,
                     totalDurationSeconds = (float)(DelphiClock.Now - _trialStart),
 
-                    baselineWindowSeconds = baselineWindowSeconds,
-                    baselineWindowEndOffsetSeconds = baselineWindowEndOffsetSeconds,
+                    meditationAcclimatisationSeconds = meditationAcclimatisationSeconds,
+                    meditationMeasurementSeconds = meditationMeasurementSeconds,
+                    meditationFadeoutSeconds = meditationFadeoutSeconds,
                     baselineChannelCount = _baseline.Count,
                     windowSeconds = windowSeconds,
-                    washoutSeconds = EffectiveWashoutSeconds,
+                    washoutSeconds = washoutSeconds,
                     measureSeconds = MeasureSeconds,
                     transitionSeconds = transitionSeconds,
+                    idleSeconds = idleSeconds,
+                    explicitTrialSeconds = explicitTrialSeconds,
 
                     activation = activation.ToString(),
                     objectiveRangeLo = objLo,
@@ -2374,8 +2467,19 @@ namespace Delphi.Session
                     ? sessionPath
                     : Path.Combine(Application.persistentDataPath, "Trials");
                 Directory.CreateDirectory(dir);
+                // Newtonsoft, not JsonUtility — matches the optimizer protocol
+                // (BoBridge) and, unlike JsonUtility, can be told to write
+                // NaN as the JSON string "NaN" (FloatFormatHandling.String)
+                // instead of a bare NaN token, which finalHypervolumeCoverage/
+                // baselineMean can legitimately be and which bare-token JSON
+                // isn't valid per spec / many parsers reject.
+                var jsonSettings = new Newtonsoft.Json.JsonSerializerSettings
+                {
+                    Formatting = Newtonsoft.Json.Formatting.Indented,
+                    FloatFormatHandling = Newtonsoft.Json.FloatFormatHandling.String
+                };
                 File.WriteAllText(Path.Combine(dir, "trial_meta.json"),
-                                  JsonUtility.ToJson(meta, prettyPrint: true));
+                                  Newtonsoft.Json.JsonConvert.SerializeObject(meta, jsonSettings));
                 Debug.Log($"[Trial] Wrote trial_meta.json ({Iteration} iterations, " +
                           $"avg {avgIterationSeconds:F1}s/iteration) → {dir}");
             }
@@ -2389,17 +2493,16 @@ namespace Delphi.Session
         {
             if (carDriver == null) return Array.Empty<TrialParameterRangeMeta>();
             var p = carDriver.parameters;
-            var ranges = new[]
+            var ranges = new TrialParameterRangeMeta[DrivingParameterRegistry.All.Length];
+            for (int i = 0; i < DrivingParameterRegistry.All.Length; i++)
             {
-                new TrialParameterRangeMeta { key = "accelerationJerk", unit = "m/s^2",
-                    physicalMin = p.accelJerkMin, physicalMax = p.accelJerkMax },
-                new TrialParameterRangeMeta { key = "brakingJerk", unit = "m/s^2",
-                    physicalMin = p.brakeJerkMin, physicalMax = p.brakeJerkMax },
-                new TrialParameterRangeMeta { key = "followDistance", unit = "s headway (inverted: 0=far/gentle, 1=close/assertive)",
-                    physicalMin = p.followMax, physicalMax = p.followMin },
-                new TrialParameterRangeMeta { key = "corneringSpeed", unit = "km/h cut in the tightest realistic turn (inverted: 0=cuts a lot/gentle, 1=barely cuts/assertive)",
-                    physicalMin = p.cornerSlowdownMaxKmh, physicalMax = p.cornerSlowdownMinKmh },
-            };
+                var info = DrivingParameterRegistry.All[i];
+                ranges[i] = new TrialParameterRangeMeta
+                {
+                    key = info.Key, unit = info.Unit,
+                    physicalMin = info.PhysicalAtZero(p), physicalMax = info.PhysicalAtOne(p)
+                };
+            }
             foreach (var r in ranges) r.active = _activeParamKeys.Contains(r.key);
             return ranges;
         }
@@ -2490,7 +2593,20 @@ namespace Delphi.Session
         {
             get
             {
-                if (CanStart && (_timelineOrder != orderIndex || _timeline.Count == 0)) BuildPlan();
+                // Edit mode: always rebuild fresh — the custom Inspector's
+                // timeline needs to reflect whatever timing field was just
+                // typed into, and there's no in-progress session plan that
+                // rebuilding could disrupt. BuildPlan() is cheap (list
+                // clears/inserts + narration length lookups), so this is
+                // safe to do on every Inspector repaint.
+                //
+                // Play mode keeps the original orderIndex-keyed cache: once
+                // CanStart goes false (a session is actually running),
+                // nothing should rebuild the plan out from under it.
+                if (!Application.isPlaying)
+                    BuildPlan();
+                else if (CanStart && (_timelineOrder != orderIndex || _timeline.Count == 0))
+                    BuildPlan();
                 return _timeline;
             }
         }
@@ -2677,14 +2793,13 @@ namespace Delphi.Session
         /// kind — the actual variables the researcher configured, not a
         /// single blanket number. Implicit: washout + measure, i.e. the whole
         /// windowSeconds — every iteration genuinely takes that long.
-        /// Explicit: only the washout is fixed; AwaitingRating has no timer
-        /// at all (it ends whenever the participant submits), so windowSeconds
-        /// — which bakes in a measure phase Explicit never runs — overstates
-        /// every single iteration. Using it anyway is exactly what made both
-        /// EstimatedConditionSeconds and CurrentConditionSecondsRemaining
-        /// wrong for Explicit conditions.</summary>
+        /// Explicit: washout + the timed Trial phase are fixed; AwaitingRating
+        /// has no timer at all (it ends whenever the participant submits), so
+        /// it's excluded — this is a FLOOR, not the real total.</summary>
         private float FixedSecondsPerIteration(ConditionKind kind) =>
-            kind == ConditionKind.Implicit ? windowSeconds : EffectiveWashoutSeconds;
+            (kind == ConditionKind.Implicit
+                ? windowSeconds
+                : washoutSeconds + explicitTrialSeconds) + boProcessingEstimateSeconds;
 
         /// <summary>Rough wall-clock length of ONE condition's drive. Returns
         /// 0 for FreeRoam, which is open-ended by design — callers should
@@ -2708,14 +2823,13 @@ namespace Delphi.Session
         /// time has to come from wherever CurrentPhase actually is:
         ///
         ///  • Washout: PhaseSecondsRemaining only covers washout ITSELF. The
-        ///    Measuring phase that follows it, later in this SAME iteration,
-        ///    isn't reflected anywhere else — so for Implicit (which always
-        ///    runs a fixed Measuring phase next) MeasureSeconds is added on
-        ///    top. Leaving that out silently underestimated by exactly
-        ///    MeasureSeconds every single time an Implicit condition was
-        ///    mid-washout.
-        ///  • Measuring: PhaseSecondsRemaining alone is already the whole
-        ///    remaining truth.
+        ///    fixed phase that follows it, later in this SAME iteration,
+        ///    isn't reflected anywhere else — so MeasureSeconds (Implicit's
+        ///    Measuring) or explicitTrialSeconds (Explicit's Trial) is added
+        ///    on top. Leaving that out silently underestimated by exactly
+        ///    that amount every single time a condition was mid-washout.
+        ///  • Trial / Measuring: PhaseSecondsRemaining alone is already the
+        ///    whole remaining truth.
         ///  • WaitingForParameters / AwaitingRating: genuinely nothing
         ///    knowable to add — WaitingForParameters' own _phaseEnd is
         ///    optimizerResponseTimeoutSeconds, a safety CEILING before giving
@@ -2732,7 +2846,8 @@ namespace Delphi.Session
             double currentIterationRemaining = CurrentPhase switch
             {
                 Phase.Washout => PhaseSecondsRemaining +
-                                 (CurrentConditionKind == ConditionKind.Implicit ? MeasureSeconds : 0),
+                                 (CurrentConditionKind == ConditionKind.Implicit ? MeasureSeconds : explicitTrialSeconds),
+                Phase.Trial => PhaseSecondsRemaining,
                 Phase.Measuring => PhaseSecondsRemaining,
                 _ => 0,
             };

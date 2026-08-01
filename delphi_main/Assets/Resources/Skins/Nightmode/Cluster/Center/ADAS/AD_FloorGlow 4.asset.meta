@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: b9e4eb9badc7d2a4197d35df3459c1f3
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/Resources/Skins/Nightmode/Cluster/Center/ADAS/AD_FloorGlow 4.asset
+  uploadId: 949372

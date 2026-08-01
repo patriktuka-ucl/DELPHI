@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: e848fbfb5f3b45442a07503567ec10a5
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 9100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 201095
+  packageName: Automotive HMI Sample
+  packageVersion: 1.4.1
+  assetPath: Assets/UnityTechnologies/HMITemplate/Animations/Map/Map.controller
+  uploadId: 949372
